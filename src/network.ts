@@ -1,31 +1,32 @@
-import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian';
-import { CollectionData, RequestItem, Environment } from './types';
-import * as fs from 'fs';
-import * as http from 'http';
-import * as https from 'https';
-const FormData = require('form-data');
+import { requestUrl, RequestUrlParam, RequestUrlResponse } from 'obsidian'
+import { CollectionData, RequestItem, Environment } from './types'
+import * as fs from 'fs'
+import * as http from 'http'
+import * as https from 'https'
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const FormData = require('form-data')
 
 export function substituteVariables(text: string, activeEnvironment?: Environment, localScopeCache?: Record<string, string>): string {
-    if (!text) return text;
-    let result = text;
+    if (!text) return text
+    let result = text
 
     // Process all {{vars}}
-    const regex = /{{([^}]+)}}/g;
+    const regex = /{{([^}]+)}}/g
     result = result.replace(regex, (match, varName) => {
         // 1. Local scope first
         if (localScopeCache && localScopeCache[varName] !== undefined) {
-            return localScopeCache[varName];
+            return localScopeCache[varName]
         }
         // 2. Global scope second
         if (activeEnvironment) {
-            const envVar = activeEnvironment.variables.find(v => v.key === varName && v.enabled);
-            if (envVar) return envVar.value;
+            const envVar = activeEnvironment.variables.find(v => v.key === varName && v.enabled)
+            if (envVar) return envVar.value
         }
         // 3. Keep original if not found
-        return match;
-    });
+        return match
+    })
 
-    return result;
+    return result
 }
 
 export async function executeRequest(
@@ -33,83 +34,83 @@ export async function executeRequest(
     collectionData: CollectionData,
     localScopeCache?: Record<string, string>
 ): Promise<{ response?: RequestUrlResponse | any, error?: string, timeMs: number }> {
-    const activeEnv = collectionData.environments.find(e => e.id === collectionData.activeEnvironmentId);
+    const activeEnv = collectionData.environments.find(e => e.id === collectionData.activeEnvironmentId)
 
-    let url = substituteVariables(request.url, activeEnv, localScopeCache);
+    let url = substituteVariables(request.url, activeEnv, localScopeCache)
 
-    const activeQueryParams = request.queryParams.filter(p => p.enabled && p.key);
+    const activeQueryParams = request.queryParams.filter(p => p.enabled && p.key)
     if (activeQueryParams.length > 0) {
-        const urlObj = new URL(url.startsWith('http') ? url : `http://${url}`);
+        const urlObj = new URL(url.startsWith('http') ? url : `http://${url}`)
         activeQueryParams.forEach(p => {
-            urlObj.searchParams.append(substituteVariables(p.key, activeEnv, localScopeCache), substituteVariables(p.value, activeEnv, localScopeCache));
-        });
-        url = urlObj.toString();
+            urlObj.searchParams.append(substituteVariables(p.key, activeEnv, localScopeCache), substituteVariables(p.value, activeEnv, localScopeCache))
+        })
+        url = urlObj.toString()
     }
 
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {}
     request.headers.filter(h => h.enabled && h.key).forEach(h => {
-        headers[substituteVariables(h.key, activeEnv, localScopeCache)] = substituteVariables(h.value, activeEnv, localScopeCache);
-    });
+        headers[substituteVariables(h.key, activeEnv, localScopeCache)] = substituteVariables(h.value, activeEnv, localScopeCache)
+    })
 
     // Apply Auth
     if (request.auth.type === 'basic' && request.auth.basicUsername) {
-        const user = substituteVariables(request.auth.basicUsername, activeEnv, localScopeCache);
-        const pass = substituteVariables(request.auth.basicPassword || '', activeEnv, localScopeCache);
-        headers['Authorization'] = 'Basic ' + Buffer.from(user + ':' + pass).toString('base64');
+        const user = substituteVariables(request.auth.basicUsername, activeEnv, localScopeCache)
+        const pass = substituteVariables(request.auth.basicPassword || '', activeEnv, localScopeCache)
+        headers['Authorization'] = 'Basic ' + Buffer.from(user + ':' + pass).toString('base64')
     } else if (request.auth.type === 'bearer' && request.auth.bearerToken) {
-        headers['Authorization'] = 'Bearer ' + substituteVariables(request.auth.bearerToken, activeEnv, localScopeCache);
+        headers['Authorization'] = 'Bearer ' + substituteVariables(request.auth.bearerToken, activeEnv, localScopeCache)
     } else if (request.auth.type === 'apikey' && request.auth.apiKeyKey) {
-        const key = substituteVariables(request.auth.apiKeyKey, activeEnv, localScopeCache);
-        const val = substituteVariables(request.auth.apiKeyValue || '', activeEnv, localScopeCache);
+        const key = substituteVariables(request.auth.apiKeyKey, activeEnv, localScopeCache)
+        const val = substituteVariables(request.auth.apiKeyValue || '', activeEnv, localScopeCache)
         if (request.auth.apiKeyAddTo === 'header') {
-            headers[key] = val;
+            headers[key] = val
         } else {
-            const urlObj = new URL(url);
-            urlObj.searchParams.append(key, val);
-            url = urlObj.toString();
+            const urlObj = new URL(url)
+            urlObj.searchParams.append(key, val)
+            url = urlObj.toString()
         }
     }
 
-    let body: string | ArrayBuffer | undefined = undefined;
+    let body: string | ArrayBuffer | undefined = undefined
 
     // Node HTTPS/HTTP fallback conditions (e.g. reading binary files or form-data with files, or custom SSL config)
-    const hasFiles = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'form-data' && request.bodyFormData.some(f => f.enabled && f.type === 'file' && f.value);
-    const hasBinaryBody = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'binary' && request.bodyBinaryPath;
-    const requiresNode = hasFiles || hasBinaryBody || request.settings.verifySsl === false;
+    const hasFiles = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'form-data' && request.bodyFormData.some(f => f.enabled && f.type === 'file' && f.value)
+    const hasBinaryBody = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'binary' && request.bodyBinaryPath
+    const requiresNode = hasFiles || hasBinaryBody || request.settings.verifySsl === false
 
     if (requiresNode) {
-        return await executeNodeRequest(url, request, headers, activeEnv);
+        return await executeNodeRequest(url, request, headers, activeEnv)
     }
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
         if (request.bodyType === 'json' || request.bodyType === 'raw') {
-            body = substituteVariables(request.bodyRaw, activeEnv, localScopeCache);
+            body = substituteVariables(request.bodyRaw, activeEnv, localScopeCache)
             if (request.bodyType === 'json' && !headers['Content-Type']) {
-                headers['Content-Type'] = 'application/json';
+                headers['Content-Type'] = 'application/json'
             }
         } else if (request.bodyType === 'form-data') {
-            const boundary = `----ObsidianPostmanBoundary${Date.now()}`;
-            headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
+            const boundary = `----ObsidianRequestBoundary${Date.now()}`
+            headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`
 
-            let parts: string[] = [];
+            const parts: string[] = []
             for (const field of request.bodyFormData.filter(f => f.enabled && f.key)) {
                 if (field.type === 'text') {
                     parts.push(
                         `--${boundary}\r\n` +
                         `Content-Disposition: form-data; name="${substituteVariables(field.key, activeEnv, localScopeCache)}"\r\n\r\n` +
                         `${substituteVariables(field.value, activeEnv, localScopeCache)}\r\n`
-                    );
+                    )
                 }
             }
-            parts.push(`--${boundary}--\r\n`);
-            body = parts.join('');
+            parts.push(`--${boundary}--\r\n`)
+            body = parts.join('')
         } else if (request.bodyType === 'x-www-form-urlencoded') {
-            headers['Content-Type'] = 'application/x-www-form-urlencoded';
-            const params = new URLSearchParams();
+            headers['Content-Type'] = 'application/x-www-form-urlencoded'
+            const params = new URLSearchParams()
             for (const field of request.bodyFormUrlEncoded.filter(f => f.enabled && f.key)) {
-                params.append(substituteVariables(field.key, activeEnv, localScopeCache), substituteVariables(field.value, activeEnv, localScopeCache));
+                params.append(substituteVariables(field.key, activeEnv, localScopeCache), substituteVariables(field.value, activeEnv, localScopeCache))
             }
-            body = params.toString();
+            body = params.toString()
         }
     }
 
@@ -119,19 +120,19 @@ export async function executeRequest(
         headers,
         body,
         throw: false
-    };
+    }
 
-    const startTime = Date.now();
+    const startTime = Date.now()
     try {
-        const obsidianResponse = await requestUrl(reqParams);
-        const timeMs = Date.now() - startTime;
+        const obsidianResponse = await requestUrl(reqParams)
+        const timeMs = Date.now() - startTime
 
-        const contentType = obsidianResponse.headers['content-type']?.toString() || '';
-        const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml');
+        const contentType = obsidianResponse.headers['content-type']?.toString() || ''
+        const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml')
 
-        let jsonPayload = null;
+        let jsonPayload = null
         if (contentType.includes('json')) {
-            jsonPayload = obsidianResponse.json;
+            jsonPayload = obsidianResponse.json
         }
 
         return {
@@ -145,80 +146,80 @@ export async function executeRequest(
                 isBinary
             },
             timeMs
-        };
+        }
     } catch (err: any) {
-        const timeMs = Date.now() - startTime;
-        return { error: err.message || "Failed to fetch", timeMs };
+        const timeMs = Date.now() - startTime
+        return { error: err.message || 'Failed to fetch', timeMs }
     }
 }
 
 async function executeNodeRequest(url: string, request: RequestItem, headers: Record<string, string>, activeEnv?: Environment, localScopeCache?: Record<string, string>) {
-    const startTime = Date.now();
+    const startTime = Date.now()
     return new Promise<any>((resolve) => {
         try {
-            let reqBody: any = null;
-            let reqHeaders = { ...headers };
+            let reqBody: any = null
+            let reqHeaders = { ...headers }
 
             if (request.method !== 'GET' && request.method !== 'HEAD') {
                 if (request.bodyType === 'form-data') {
-                    const form = new FormData();
+                    const form = new FormData()
                     for (const field of request.bodyFormData.filter(f => f.enabled && f.key)) {
-                        const fieldName = substituteVariables(field.key, activeEnv, localScopeCache);
+                        const fieldName = substituteVariables(field.key, activeEnv, localScopeCache)
                         if (field.type === 'text') {
-                            form.append(fieldName, substituteVariables(field.value, activeEnv, localScopeCache));
+                            form.append(fieldName, substituteVariables(field.value, activeEnv, localScopeCache))
                         } else if (field.type === 'file' && field.value) {
-                            const filePath = substituteVariables(field.value, activeEnv, localScopeCache);
+                            const filePath = substituteVariables(field.value, activeEnv, localScopeCache)
                             if (fs.existsSync(filePath)) {
-                                form.append(fieldName, fs.createReadStream(filePath));
+                                form.append(fieldName, fs.createReadStream(filePath))
                             } else {
-                                throw new Error(`File not found: ${filePath}`);
+                                throw new Error(`File not found: ${filePath}`)
                             }
                         }
                     }
-                    reqBody = form;
-                    reqHeaders = { ...reqHeaders, ...form.getHeaders() };
+                    reqBody = form
+                    reqHeaders = { ...reqHeaders, ...form.getHeaders() }
                 } else if (request.bodyType === 'binary') {
-                    const filePath = substituteVariables(request.bodyBinaryPath, activeEnv, localScopeCache);
+                    const filePath = substituteVariables(request.bodyBinaryPath, activeEnv, localScopeCache)
                     if (fs.existsSync(filePath)) {
-                        reqBody = fs.createReadStream(filePath);
-                        const stats = fs.statSync(filePath);
-                        reqHeaders['Content-Length'] = stats.size.toString();
+                        reqBody = fs.createReadStream(filePath)
+                        const stats = fs.statSync(filePath)
+                        reqHeaders['Content-Length'] = stats.size.toString()
                         if (!reqHeaders['Content-Type']) {
-                            reqHeaders['Content-Type'] = 'application/octet-stream';
+                            reqHeaders['Content-Type'] = 'application/octet-stream'
                         }
                     } else {
-                        throw new Error(`Binary file not found: ${filePath}`);
+                        throw new Error(`Binary file not found: ${filePath}`)
                     }
                 }
             }
 
-            const urlObj = new URL(url);
+            const urlObj = new URL(url)
             const reqOptions: https.RequestOptions = {
                 method: request.method,
                 headers: reqHeaders,
                 rejectUnauthorized: request.settings.verifySsl !== false
-            };
+            }
 
-            const client = urlObj.protocol === 'https:' ? https : http;
+            const client = urlObj.protocol === 'https:' ? https : http
 
             const req = client.request(url, reqOptions, (res) => {
-                const chunks: Buffer[] = [];
+                const chunks: Buffer[] = []
                 res.on('data', (chunk) => {
-                    chunks.push(Buffer.from(chunk));
-                });
+                    chunks.push(Buffer.from(chunk))
+                })
                 res.on('end', () => {
-                    const timeMs = Date.now() - startTime;
-                    const buffer = Buffer.concat(chunks);
-                    const contentType = res.headers['content-type'] || '';
+                    const timeMs = Date.now() - startTime
+                    const buffer = Buffer.concat(chunks)
+                    const contentType = res.headers['content-type'] || ''
 
-                    let text = '';
-                    let json = null;
-                    const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml');
+                    let text = ''
+                    let json = null
+                    const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml')
 
                     if (!isBinary) {
-                        text = buffer.toString('utf8');
+                        text = buffer.toString('utf8')
                         if (contentType.includes('json')) {
-                            try { json = JSON.parse(text); } catch(e) {}
+                            try { json = JSON.parse(text) } catch(e) {}
                         }
                     }
 
@@ -233,26 +234,26 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
                             isBinary
                         },
                         timeMs
-                    });
-                });
-            });
+                    })
+                })
+            })
 
             req.on('error', (e) => {
-                resolve({ error: e.message, timeMs: Date.now() - startTime });
-            });
+                resolve({ error: e.message, timeMs: Date.now() - startTime })
+            })
 
             if (reqBody) {
                 if (reqBody.pipe) {
-                    reqBody.pipe(req);
+                    reqBody.pipe(req)
                 } else {
-                    req.write(reqBody);
-                    req.end();
+                    req.write(reqBody)
+                    req.end()
                 }
             } else {
-                req.end();
+                req.end()
             }
         } catch(e: any) {
-            resolve({ error: e.message, timeMs: Date.now() - startTime });
+            resolve({ error: e.message, timeMs: Date.now() - startTime })
         }
-    });
+    })
 }

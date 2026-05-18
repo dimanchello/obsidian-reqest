@@ -1,200 +1,166 @@
-import { Plugin, TextFileView, WorkspaceLeaf, TFile, MarkdownView } from 'obsidian';
-import * as React from 'react';
-import { createRoot, Root } from 'react-dom/client';
-import { App } from './ui/App';
-import { parseCollectionData, updateCollectionData } from './storage';
+import { Plugin, WorkspaceLeaf, TFile, MarkdownView, MarkdownPostProcessorContext } from 'obsidian'
+import * as React from 'react'
+import { createRoot, Root } from 'react-dom/client'
+import { App } from './ui/App'
+import { loadCollection, saveCollection, renameCollection, DEFAULT_COLLECTION_DATA, CollectionData, getCollectionNameFromNotePath } from './storage'
 
-export const VIEW_TYPE_POSTMAN_COLLECTION = 'postman-collection-view';
+export const VIEW_TYPE_REQUEST_COLLECTION = 'request-collection-view'
 
-class PostmanCollectionView extends TextFileView {
-    root: Root | null = null;
-    plugin: PostmanClonePlugin;
+class RequestCollectionView extends MarkdownView {
+    root: Root | null = null
+    plugin: ObsidianRequestPlugin
+    collectionData: CollectionData
 
-    constructor(leaf: WorkspaceLeaf, plugin: PostmanClonePlugin) {
-        super(leaf);
-        this.plugin = plugin;
-
-        // Add "Open as Markdown" action
-        this.addAction('file-code-2', 'Open as Markdown', () => {
-            this.openAsMarkdown();
-        });
-    }
-
-    async openAsMarkdown() {
-        // Record this leaf as deliberately suspended so the layout-change event doesn't immediately snap it back
-        this.plugin.suspendedLeaves.add(this.leaf);
-        await this.leaf.setViewState({
-            type: 'markdown',
-            state: this.leaf.view.getState()
-        });
-    }
-
-    getViewData(): string {
-        return this.data;
-    }
-
-    setViewData(data: string, clear: boolean): void {
-        this.data = data;
-        this.renderReact();
-    }
-
-    clear(): void {
-        this.data = "";
-        this.renderReact();
+    constructor(leaf: WorkspaceLeaf, plugin: ObsidianRequestPlugin) {
+        super(leaf)
+        this.plugin = plugin
+        this.collectionData = DEFAULT_COLLECTION_DATA
     }
 
     getViewType(): string {
-        return VIEW_TYPE_POSTMAN_COLLECTION;
+        return VIEW_TYPE_REQUEST_COLLECTION
     }
 
     getDisplayText(): string {
-        return this.file ? this.file.basename : "Postman Collection";
+        return this.file ? `Request: ${this.file.basename}` : 'Request Collection'
     }
 
-    async handleSaveData(newData: any) {
-        if (this.file) {
-            this.data = updateCollectionData(this.data, newData);
-            await this.app.vault.modify(this.file, this.data);
-        }
+    getCollectionName(): string {
+        return this.file ? getCollectionNameFromNotePath(this.file.path) : 'request-collection'
     }
 
-    renderReact() {
-        const container = this.contentEl;
-        container.empty();
+    async onLoadFile(file: TFile): Promise<void> {
+        await super.onLoadFile(file)
+        await this.loadCollection()
+        this.renderReact()
+    }
 
-        const data = parseCollectionData(this.data);
+    async loadCollection(): Promise<void> {
+        this.collectionData = await loadCollection(this.app, this.getCollectionName())
+    }
 
-        const reactRoot = container.createDiv({ cls: 'postman-clone-root', attr: { style: 'height: 100%; width: 100%;' } });
+    async handleSaveData(newData: CollectionData): Promise<void> {
+        this.collectionData = newData
+        await saveCollection(this.app, this.getCollectionName(), newData)
+    }
+
+    renderReact(): void {
+        const container = this.contentEl
+        container.empty()
+
+        const reactRoot = container.createDiv({ cls: 'obsidian-request-root', attr: { style: 'height: 100%; width: 100%;' } })
         if (!this.root) {
-            this.root = createRoot(reactRoot);
+            this.root = createRoot(reactRoot)
         }
 
         this.root.render(
             React.createElement(App, {
-                data: data,
-                onSave: (newData) => this.handleSaveData(newData)
+                data: this.collectionData,
+                onSave: (newData: CollectionData) => this.handleSaveData(newData),
+                collectionName: this.getCollectionName()
             })
-        );
+        )
     }
 
-    async onClose() {
+    async onClose(): Promise<void> {
         if (this.root) {
-            this.root.unmount();
-            this.root = null;
+            this.root.unmount()
+            this.root = null
         }
+        await super.onClose()
     }
 }
 
-export default class PostmanClonePlugin extends Plugin {
-    suspendedLeaves: Set<WorkspaceLeaf> = new Set();
+export default class ObsidianRequestPlugin extends Plugin {
+    async onload(): Promise<void> {
+        this.registerView(VIEW_TYPE_REQUEST_COLLECTION, (leaf) => new RequestCollectionView(leaf, this))
 
-    async onload() {
-        this.registerView(VIEW_TYPE_POSTMAN_COLLECTION, (leaf) => new PostmanCollectionView(leaf, this));
-        this.registerExtensions(['postmancollection'], VIEW_TYPE_POSTMAN_COLLECTION);
+        this.registerMarkdownCodeBlockProcessor('request-collection', this.handleCodeBlock.bind(this))
 
-        // This button will appear on all markdown files, but we can configure it to only show
-        // or be clickable when it's an api-collection
         this.registerEvent(
-            this.app.workspace.on('layout-change', () => {
-                this.checkActiveLeaves();
+            this.app.vault.on('rename', (file: TFile, oldPath: string) => {
+                if (file.extension === 'md') {
+                    const oldName = getCollectionNameFromNotePath(oldPath)
+                    const newName = getCollectionNameFromNotePath(file.path)
+                    if (oldName !== newName) {
+                        renameCollection(this.app, oldName, newName)
+                    }
+                }
             })
-        );
+        )
 
-        // Also check on load in case the file was open when Obsidian started
-        this.app.workspace.onLayoutReady(() => {
-            this.checkActiveLeaves();
-        });
+        this.registerEvent(
+            this.app.vault.on('delete', (file: TFile) => {
+                if (file.extension === 'md') {
+                    const collectionName = getCollectionNameFromNotePath(file.path)
+                    this.app.vault.adapter.exists(`${this.app.vault.adapter.getBasePath()}/collections/${collectionName}.json`).then(exists => {
+                        if (exists) {
+                            import('./storage').then(mod => mod.deleteCollection(this.app, collectionName))
+                        }
+                    })
+                }
+            })
+        )
 
-        // Add a ribbon icon as a fallback to manually convert the active markdown file
-        this.addRibbonIcon('zap', 'Open as API Collection', async () => {
-            const file = this.app.workspace.getActiveFile();
+        this.addRibbonIcon('zap', 'Open Request Collection', async () => {
+            const file = this.app.workspace.getActiveFile()
             if (file && file.extension === 'md') {
-                this.activateCollectionView(file);
+                await this.openCollectionForFile(file)
             }
-        });
+        })
 
-        // Add a command to the command palette
         this.addCommand({
-            id: 'open-as-api-collection',
-            name: 'Open active file as API Collection',
+            id: 'open-request-collection',
+            name: 'Open request collection for current note',
             checkCallback: (checking: boolean) => {
-                const file = this.app.workspace.getActiveFile();
+                const file = this.app.workspace.getActiveFile()
                 if (file && file.extension === 'md') {
                     if (!checking) {
-                        this.activateCollectionView(file);
+                        this.openCollectionForFile(file)
                     }
-                    return true;
+                    return true
                 }
-                return false;
+                return false
             }
-        });
-
-        // Add file menu option
-        this.registerEvent(
-            this.app.workspace.on('file-menu', (menu, file) => {
-                if (file instanceof TFile && file.extension === 'md') {
-                    menu.addItem((item) => {
-                        item
-                            .setTitle('Open as API Collection')
-                            .setIcon('zap')
-                            .onClick(() => {
-                                this.activateCollectionView(file);
-                            });
-                    });
-                }
-            })
-        );
+        })
     }
 
-    // Check all leaves to see if any are standard markdown views but have the api-collection frontmatter
-    checkActiveLeaves() {
-        const leaves = this.app.workspace.getLeavesOfType("markdown");
-        for (const leaf of leaves) {
-            if (this.suspendedLeaves.has(leaf)) {
-                // If the user navigated away or closed the leaf, we could clear it from the set,
-                // but for simplicity, we just skip auto-switching it back to Postman view.
-                continue;
-            }
-            if (leaf.view instanceof MarkdownView && leaf.view.file) {
-                const file = leaf.view.file;
-                const cache = this.app.metadataCache.getFileCache(file);
-                if (cache?.frontmatter && cache.frontmatter['api-collection'] === true) {
-                    // It's a markdown view, but it should be our custom view. Switch it!
-                    this.activateCollectionViewForLeaf(file, leaf);
-                }
-            }
-        }
+    handleCodeBlock(_source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
+        const collectionName = getCollectionNameFromNotePath(ctx.sourcePath)
 
-        // Clean up suspended leaves that are no longer markdown views or no longer exist
-        for (const leaf of Array.from(this.suspendedLeaves)) {
-            if (leaf.view.getViewType() !== 'markdown') {
-                this.suspendedLeaves.delete(leaf);
+        const container = el.createDiv({ cls: 'obsidian-request-embed', attr: { style: 'height: 600px; border: 1px solid var(--background-modifier-border); border-radius: 4px;' } })
+
+        const reactRoot = container.createDiv({ cls: 'obsidian-request-root', attr: { style: 'height: 100%; width: 100%;' } })
+        const root = createRoot(reactRoot)
+
+        loadCollection(this.app, collectionName).then(data => {
+            root.render(
+                React.createElement(App, {
+                    data: data,
+                    onSave: async (newData: CollectionData) => {
+                        await saveCollection(this.app, collectionName, newData)
+                    },
+                    collectionName: collectionName
+                })
+            )
+        })
+
+        ctx.addChild({
+            containerEl: el,
+            onload: () => {},
+            onunload: () => {
+                root.unmount()
             }
-        }
+        })
     }
 
-    async activateCollectionViewForLeaf(file: TFile, leaf: WorkspaceLeaf) {
-        // Prevent infinite loops by checking the type first
-        if (leaf.view.getViewType() !== VIEW_TYPE_POSTMAN_COLLECTION) {
-             await leaf.setViewState({
-                type: VIEW_TYPE_POSTMAN_COLLECTION,
-                state: leaf.view.getState()
-            });
-        }
-    }
-
-    async activateCollectionView(file: TFile) {
-        let leaf = this.app.workspace.getMostRecentLeaf();
+    async openCollectionForFile(file: TFile): Promise<void> {
+        const leaf = this.app.workspace.getMostRecentLeaf()
         if (leaf) {
-            if (this.suspendedLeaves.has(leaf)) {
-                this.suspendedLeaves.delete(leaf);
-            }
-            if (leaf.view.getViewType() !== VIEW_TYPE_POSTMAN_COLLECTION) {
-                await leaf.setViewState({
-                    type: VIEW_TYPE_POSTMAN_COLLECTION,
-                    state: { file: file.path }
-                });
-            }
+            await leaf.setViewState({
+                type: VIEW_TYPE_REQUEST_COLLECTION,
+                state: { file: file.path }
+            })
         }
     }
 }
