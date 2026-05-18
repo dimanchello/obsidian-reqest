@@ -1,9 +1,9 @@
 /*
-  Obsidian Postman Clone Plugin Styles
+  Obsidian Request Plugin Styles
   Modern, clean, responsive UI heavily relying on Obsidian's CSS variables.
 */
 
-.postman-clone-root {
+.obsidian-request-root {
     display: flex;
     flex-direction: row;
     height: 100%;
@@ -14,23 +14,23 @@
 }
 
 /* Scrollbars */
-.postman-clone-root ::-webkit-scrollbar {
+.obsidian-request-root ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
-.postman-clone-root ::-webkit-scrollbar-track {
+.obsidian-request-root ::-webkit-scrollbar-track {
     background: transparent;
 }
-.postman-clone-root ::-webkit-scrollbar-thumb {
+.obsidian-request-root ::-webkit-scrollbar-thumb {
     background: var(--background-modifier-border);
     border-radius: 4px;
 }
-.postman-clone-root ::-webkit-scrollbar-thumb:hover {
+.obsidian-request-root ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
 
 /* Sidebar */
-.postman-sidebar {
+.obsidian-request-sidebar {
     width: 250px;
     border-right: 1px solid var(--background-modifier-border-hover);
     background-color: var(--background-secondary);
@@ -39,18 +39,18 @@
     transition: transform 0.3s ease;
 }
 
-.postman-sidebar-header {
+.obsidian-request-sidebar-header {
     padding: 15px;
     border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.postman-request-list {
+.obsidian-request-request-list {
     flex: 1;
     overflow-y: auto;
     padding: 10px;
 }
 
-.postman-request-item {
+.obsidian-request-request-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -61,15 +61,15 @@
     transition: background-color 0.1s ease;
 }
 
-.postman-request-item:hover {
+.obsidian-request-request-item:hover {
     background-color: var(--background-modifier-hover);
 }
 
-.postman-request-item.active {
+.obsidian-request-request-item.active {
     background-color: var(--background-modifier-active-hover);
 }
 
-.postman-method-badge {
+.obsidian-request-method-badge {
     font-size: 9px;
     font-weight: 700;
     margin-right: 6px;
@@ -83,7 +83,7 @@
 .method-OPTIONS, .method-HEAD { color: var(--text-muted); }
 
 /* Main Area */
-.postman-main {
+.obsidian-request-main {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -93,7 +93,7 @@
 }
 
 /* Mobile Header / Sidebar Toggle */
-.postman-mobile-header {
+.obsidian-request-mobile-header {
     display: none;
     padding: 10px 15px;
     background-color: var(--background-secondary);
@@ -101,7 +101,7 @@
     align-items: center;
     gap: 10px;
 }
-.postman-mobile-header button {
+.obsidian-request-mobile-header button {
     background: transparent;
     border: none;
     box-shadow: none;
@@ -110,11 +110,11 @@
 }
 
 /* Editor Header */
-.postman-editor-header {
+.obsidian-request-editor-header {
     padding: 15px 20px 0 20px;
 }
 
-.postman-request-title-input {
+.obsidian-request-request-title-input {
     font-size: 1.2em;
     font-weight: 600;
     background: transparent;
@@ -127,12 +127,12 @@
     transition: border-color 0.2s;
     box-shadow: none !important;
 }
-.postman-request-title-input:hover, .postman-request-title-input:focus {
+.obsidian-request-request-title-input:hover, .obsidian-request-request-title-input:focus {
     border-bottom: 1px solid var(--interactive-accent) !important;
 }
 
 /* URL Bar */
-.postman-url-bar {
+.obsidian-request-url-bar {
     display: flex;
     border: 1px solid var(--background-modifier-border-hover);
     border-radius: 6px;
@@ -142,7 +142,7 @@
     align-items: stretch;
 }
 
-.postman-url-bar select {
+.obsidian-request-url-bar select {
     border: none;
     border-right: 1px solid var(--background-modifier-border);
     background-color: var(--background-secondary);
@@ -154,7 +154,7 @@
     height: auto;
 }
 
-.postman-url-bar input {
+.obsidian-request-url-bar input {
     flex: 1;
     border: none !important;
     padding: 8px 15px;
@@ -165,7 +165,7 @@
     height: auto;
 }
 
-.postman-url-bar button {
+.obsidian-request-url-bar button {
     border: none;
     background-color: var(--interactive-accent);
     color: var(--text-on-accent);
@@ -177,16 +177,16 @@
     line-height: normal;
     height: auto;
 }
-.postman-url-bar button:hover {
+.obsidian-request-url-bar button:hover {
     opacity: 0.9;
 }
-.postman-url-bar button:disabled {
+.obsidian-request-url-bar button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
 
 /* Tabs */
-.postman-tabs-header {
+.obsidian-request-tabs-header {
     display: flex;
     border-bottom: 1px solid var(--background-modifier-border);
     margin: 0 20px;
@@ -196,11 +196,11 @@
     scrollbar-width: none; /* Firefox */
     max-width: 100%;
 }
-.postman-tabs-header::-webkit-scrollbar {
+.obsidian-request-tabs-header::-webkit-scrollbar {
     display: none; /* Safari/Chrome */
 }
 
-.postman-tab {
+.obsidian-request-tab {
     padding: 10px 5px;
     cursor: pointer;
     color: var(--text-muted);
@@ -210,32 +210,32 @@
     flex-shrink: 0;
 }
 
-.postman-tab:hover {
+.obsidian-request-tab:hover {
     color: var(--text-normal);
 }
 
-.postman-tab.active {
+.obsidian-request-tab.active {
     color: var(--text-normal);
     border-bottom: 2px solid var(--interactive-accent);
     font-weight: 600;
 }
 
 /* Tab Content */
-.postman-tab-content {
+.obsidian-request-tab-content {
     flex: 1;
     padding: 20px;
     overflow-y: auto;
 }
 
 /* Key Value Table */
-.postman-kv-row {
+.obsidian-request-kv-row {
     display: flex;
     gap: 10px;
     align-items: center;
     margin-bottom: 8px;
 }
 
-.postman-kv-input {
+.obsidian-request-kv-input {
     background: var(--background-primary);
     border: 1px solid var(--background-modifier-border);
     padding: 6px 10px;
@@ -243,12 +243,12 @@
     box-shadow: none !important;
 }
 
-.postman-kv-input:focus {
+.obsidian-request-kv-input:focus {
     border-color: var(--interactive-accent);
 }
 
 /* Response Area */
-.postman-response-area {
+.obsidian-request-response-area {
     min-height: 100px;
     max-height: 85%;
     display: flex;
@@ -256,7 +256,7 @@
     background-color: var(--background-primary);
 }
 
-.postman-response-header {
+.obsidian-request-response-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -266,23 +266,23 @@
     font-size: 0.9em;
 }
 
-.postman-response-status {
+.obsidian-request-response-status {
     display: flex;
     gap: 15px;
     align-items: center;
 }
 
-.postman-badge {
+.obsidian-request-badge {
     padding: 2px 6px;
     border-radius: 4px;
     font-weight: 600;
     font-size: 0.85em;
     background-color: var(--background-modifier-border);
 }
-.postman-badge.success { color: var(--color-green); background-color: rgba(var(--color-green-rgb), 0.1); }
-.postman-badge.error { color: var(--color-red); background-color: rgba(var(--color-red-rgb), 0.1); }
+.obsidian-request-badge.success { color: var(--color-green); background-color: rgba(var(--color-green-rgb), 0.1); }
+.obsidian-request-badge.error { color: var(--color-red); background-color: rgba(var(--color-red-rgb), 0.1); }
 
-.postman-response-body {
+.obsidian-request-response-body {
     flex: 1;
     padding: 15px 20px;
     overflow: auto;
@@ -292,7 +292,7 @@
 }
 
 /* Modal Environment Manager */
-.postman-modal-overlay {
+.obsidian-request-modal-overlay {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0, 0, 0, 0.5);
@@ -303,7 +303,7 @@
     backdrop-filter: blur(2px);
 }
 
-.postman-modal {
+.obsidian-request-modal {
     background: var(--background-primary);
     border: 1px solid var(--background-modifier-border-hover);
     border-radius: 8px;
@@ -349,31 +349,31 @@
 
 /* Responsive */
 @media (max-width: 768px) {
-    .postman-sidebar {
+    .obsidian-request-sidebar {
         position: absolute;
         z-index: 50;
         height: 100%;
         transform: translateX(-100%);
         box-shadow: 2px 0 10px rgba(0,0,0,0.2);
     }
-    .postman-sidebar.mobile-open {
+    .obsidian-request-sidebar.mobile-open {
         transform: translateX(0);
     }
-    .postman-mobile-header {
+    .obsidian-request-mobile-header {
         display: flex;
     }
-    .postman-url-bar {
+    .obsidian-request-url-bar {
         flex-direction: column;
     }
-    .postman-url-bar select { border-right: none; border-bottom: 1px solid var(--background-modifier-border); }
-    .postman-url-bar button { padding: 15px; }
+    .obsidian-request-url-bar select { border-right: none; border-bottom: 1px solid var(--background-modifier-border); }
+    .obsidian-request-url-bar button { padding: 15px; }
 
-    .postman-modal {
+    .obsidian-request-modal {
         width: 95%;
         height: 90%;
         flex-direction: column;
     }
-    .postman-modal .env-sidebar {
+    .obsidian-request-modal .env-sidebar {
         width: 100% !important;
         height: 150px;
         border-right: none !important;
@@ -382,13 +382,13 @@
 }
 
 /* Variable Highlighting */
-.postman-var-highlight {
+.obsidian-request-var-highlight {
     color: var(--color-orange);
     font-weight: bold;
     cursor: help;
     border-bottom: 1px dashed var(--color-orange);
 }
-.postman-highlighted-input-container {
+.obsidian-request-highlighted-input-container {
     flex: 1;
     display: flex;
     align-items: center;
@@ -398,12 +398,12 @@
     white-space: pre;
     font-family: var(--font-monospace);
 }
-.postman-highlighted-input-display {
+.obsidian-request-highlighted-input-display {
     width: 100%;
     overflow-x: auto;
     scrollbar-width: none; /* Firefox */
 }
-.postman-highlighted-input-display::-webkit-scrollbar {
+.obsidian-request-highlighted-input-display::-webkit-scrollbar {
     display: none; /* Chrome, Safari, Opera */
 }
 
@@ -414,14 +414,14 @@
 .json-boolean { color: var(--color-blue); }
 .json-null { color: var(--text-faint); font-style: italic; }
 
-.postman-response-body pre {
+.obsidian-request-response-body pre {
     margin: 0;
     white-space: pre-wrap;
     word-break: break-all;
 }
 
 /* Resizable Divider */
-.postman-resizer {
+.obsidian-request-resizer {
     height: 6px;
     background-color: var(--background-modifier-border);
     cursor: ns-resize;
@@ -431,11 +431,11 @@
     transition: background-color 0.2s;
 }
 
-.postman-resizer:hover, .postman-resizer.dragging {
+.obsidian-request-resizer:hover, .obsidian-request-resizer.dragging {
     background-color: var(--interactive-accent);
 }
 
-.postman-resizer::after {
+.obsidian-request-resizer::after {
     content: '';
     width: 30px;
     height: 2px;
@@ -444,7 +444,7 @@
 }
 
 /* Horizontal Sidebar Resizer */
-.postman-sidebar-resizer {
+.obsidian-request-sidebar-resizer {
     width: 6px;
     background-color: var(--background-modifier-border);
     cursor: ew-resize;
@@ -454,11 +454,11 @@
     transition: background-color 0.2s;
 }
 
-.postman-sidebar-resizer:hover, .postman-sidebar-resizer.dragging {
+.obsidian-request-sidebar-resizer:hover, .obsidian-request-sidebar-resizer.dragging {
     background-color: var(--interactive-accent);
 }
 
-.postman-sidebar-resizer::after {
+.obsidian-request-sidebar-resizer::after {
     content: '';
     height: 30px;
     width: 2px;
@@ -467,25 +467,25 @@
 }
 
 /* Allow selection in response */
-.postman-response-body {
+.obsidian-request-response-body {
     user-select: text;
     -webkit-user-select: text;
 }
 
 /* Sidebar Drag and Drop */
-.postman-request-item {
+.obsidian-request-request-item {
     user-select: none;
 }
-.postman-request-item.drag-over {
+.obsidian-request-request-item.drag-over {
     border-bottom: 2px solid var(--interactive-accent);
 }
-.postman-request-item.drag-over-top {
+.obsidian-request-request-item.drag-over-top {
     border-top: 2px solid var(--interactive-accent);
     border-bottom: none;
 }
 
 /* Divider Item */
-.postman-divider-item {
+.obsidian-request-divider-item {
     display: flex;
     align-items: center;
     padding: 6px 4px;
@@ -494,15 +494,15 @@
     opacity: 0.7;
     transition: opacity 0.2s;
 }
-.postman-divider-item:hover {
+.obsidian-request-divider-item:hover {
     opacity: 1;
 }
-.postman-divider-item-line {
+.obsidian-request-divider-item-line {
     width: 20px;
     height: 1px;
     background-color: var(--background-modifier-border);
 }
-.postman-divider-input {
+.obsidian-request-divider-input {
     background: transparent;
     border: none !important;
     box-shadow: none !important;
@@ -519,6 +519,6 @@
     overflow: hidden;
     white-space: nowrap;
 }
-.postman-divider-input:focus {
+.obsidian-request-divider-input:focus {
     color: var(--text-normal);
 }

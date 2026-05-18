@@ -1,57 +1,104 @@
-# Obsidian Postman Clone
+# Obsidian Request
 
-A powerful, native Obsidian plugin that brings full-featured API testing capabilities directly into your vault. Designed to perfectly match Obsidian's native theme and workflow, this plugin allows you to build, test, and manage complex API collections seamlessly.
+Плагин для Obsidian, который добавляет возможность создавать, управлять и выполнять HTTP API запросы прямо в заметках.
 
-## 🚀 Features (v1.0.0)
+## Возможности
 
-*   **Native Obsidian Experience:** Adapts flawlessly to your light/dark themes, accent colors, and supports both desktop and mobile interfaces with resizable, scrollable panels.
-*   **Markdown Storage:** API Collections are stored as simple JSON code blocks inside standard Obsidian Markdown notes (`.md`), ensuring they sync perfectly across all your devices using Obsidian Sync, Git, or any other service.
-*   **Comprehensive Request Support:**
-    *   **Methods:** `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `HEAD`.
-    *   **Auth:** `Basic`, `Bearer Token`, and `API Key` (header or query injection).
-    *   **Body Types:** Raw JSON, XML/HTML, `x-www-form-urlencoded`, `multipart/form-data` (with full file upload support via native OS file pickers!), and raw `binary` files.
-*   **Environments & Variables:** Manage multiple environments (e.g., Local, Dev, Prod) with variables. Use `{{variableName}}` anywhere in your URLs, headers, or body payloads to dynamically inject data.
-*   **JSONPath Extraction:** Automatically parse API responses using [JSONPath](https://github.com/JSONPath-Plus/JSONPath) to extract tokens or IDs and save them into your active environment variables for subsequent requests.
-*   **Pre-request Dependencies:** Chain requests together! Select other requests to run sequentially before your main request. View their execution logs, response bodies, and extracted variables in a dedicated UI tab.
-*   **Rich Response Viewer:**
-    *   View Status Codes, Time (ms), and Response Sizes.
-    *   Inspect Response Headers and parsed Cookies.
-    *   **Syntax Highlighting:** Automatically formats and highlights JSON and XML responses.
-    *   **Preview Mode:** Render HTML responses natively in an iframe, or view binary image payloads directly inside Obsidian.
-*   **Developer Quality-of-Life:**
-    *   One-click **Prettify** button for raw request bodies.
-    *   Live URL ↔ Query Parameter two-way synchronization.
-    *   Search/filter your request list instantly.
-*   **Postman Interoperability:** Import standard Postman Collections (v2.1.0 JSON format) into your Obsidian note, and Export your Obsidian API notes back out into Postman-compatible files.
+- **Нативный интерфейс:** Адаптируется под светлую/тёмную тему, акцентные цвета Obsidian. Работает на десктопе и мобильных устройствах.
+- **Отдельная коллекция для каждой заметки:** Каждая заметка с блоком ` ```request-collection ` имеет свою коллекцию запросов. Файлы хранятся в `.obsidian/plugins/obsidian-request/collections/<имя-заметки>.json`.
+- **Автоматическое переименование:** При переименовании заметки через Obsidian, файл коллекции автоматически переименовывается.
+- **Инициализация в заметке:** Напишите блок кода ````request-collection` в любой заметке — плагин отобразит редактор запросов.
+- **Поддержка запросов:**
+  - **Методы:** `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `HEAD`
+  - **Авторизация:** `Basic`, `Bearer Token`, `API Key` (в заголовок или в query-параметры)
+  - **Тело запроса:** Raw JSON/XML, `x-www-form-urlencoded`, `multipart/form-data` (с загрузкой файлов), бинарные файлы
+- **Окружения и переменные:** Несколько окружений (Local, Dev, Prod) с переменными. Синтаксис `{{variableName}}` в URL, заголовках и теле запроса.
+- **JSONPath:** Извлечение значений из JSON-ответов и сохранение в переменные окружения.
+- **Зависимости запросов:** Цепочки запросов — выполнение зависимых запросов перед основным с передачей переменных.
+- **Просмотр ответов:** Статус-код, время ответа, заголовки, cookies, подсветка синтаксиса JSON/XML, предпросмотр HTML и изображений.
+- **Импорт/Экспорт:** Импорт коллекций из внешнего формата (v2.1.0), экспорт в совместимый формат.
 
-## 🛠️ How to Use
+## Установка
 
-### 1. Initialize a Collection
-Create a new note in Obsidian. Add the following YAML frontmatter at the very top of the file:
-```yaml
----
-api-collection: true
----
-```
-When you open or click on this note, the standard text editor will immediately transform into the API Editor interface. *(You can always switch back to the raw markdown editor via the `Open as Markdown` button in the top right menu of the pane).*
+### Через BRAT (рекомендуется)
 
-### 2. Creating Requests
-Click **+ Add Request** in the sidebar. You can rename the request by clicking its title at the top of the editor.
+1. Установите плагин [BRAT](https://github.com/TfTHacker/obsidian42-brat) из магазина плагинов Obsidian.
+2. Откройте настройки Obsidian → **Community Plugins** → **BRAT**.
+3. Нажмите **Add a plugin**.
+4. Вставьте ссылку на репозиторий: `https://github.com/dimanchello/obsidian-request`
+5. Нажмите **Add Plugin**.
+6. После установки перезагрузите Obsidian.
+7. Включите плагин **Obsidian Request** в настройках плагинов.
 
-### 3. Using Environments
-Click the `⚙️ Manage` icon above the environment dropdown in the sidebar to create an environment. Add a variable (e.g., `host = https://api.example.com`).
-Now, type `{{host}}/users` into your request URL bar.
+### Вручную
 
-### 4. Running Dependency Chains (Pre-reqs)
-If your request requires an authentication token from a `/login` endpoint, go to the **Pre-req** tab of your main request. Search for and add the `/login` request. Now, when you click **Send**, the plugin will first execute `/login`, extract the token (if you configured an extraction rule on it), and *then* run your main request with the newly acquired token.
+1. Скачайте последнюю версию плагина из релизов.
+2. Создайте папку `.obsidian/plugins/obsidian-request` в вашем хранилище.
+3. Скопируйте файлы `main.js`, `manifest.json` и `styles.css` из папки `dist/` в эту папку.
+4. Перезагрузите Obsidian и включите плагин в **Settings → Community Plugins**.
 
-## 📥 Installation
+### Из исходного кода
 
-1. Copy the plugin folder into your vault's `.obsidian/plugins/` directory.
-2. Ensure you have Node.js installed on your machine.
-3. Open a terminal in the plugin folder and run:
+1. Клонируйте репозиторий:
+   ```bash
+   git clone https://github.com/dimanchello/obsidian-request.git
+   cd obsidian-request
+   ```
+2. Установите зависимости и соберите:
    ```bash
    npm install
    npm run build
    ```
-4. Restart Obsidian, go to **Settings > Community Plugins**, and enable **Postman Clone**.
+3. Скопируйте содержимое папки `dist/` (`main.js`, `manifest.json`, `styles.css`) в `.obsidian/plugins/obsidian-request/`.
+4. Перезагрузите Obsidian и включите плагин.
+
+## Использование
+
+### 1. Создание коллекции в заметке
+
+Напишите в любой заметке блок кода:
+
+```request-collection
+Моя коллекция API запросов
+```
+
+Плагин автоматически:
+1. Создаст файл коллекции `.obsidian/plugins/obsidian-request/collections/<имя-заметки>.json`
+2. Отобразит редактор запросов на месте блока кода
+
+Каждая заметка имеет свою отдельную коллекцию. При переименовании заметки файл коллекции автоматически переименовывается.
+
+### 2. Создание запросов
+
+Нажмите **+ Request** в боковой панели. Переименуйте запрос, кликнув на заголовок в редакторе.
+
+### 3. Использование окружений
+
+Нажмите иконку `⚙️` над выпадающим списком окружений. Создайте окружение и добавьте переменные (например, `host = https://api.example.com`). Используйте `{{host}}/users` в URL запроса.
+
+### 4. Цепочки запросов (Pre-req)
+
+Если запрос требует токен авторизации с эндпоинта `/login`, перейдите на вкладку **Pre-req** и добавьте запрос `/login`. При нажатии **Send** плагин сначала выполнит `/login`, извлечёт токен, а затем выполнит основной запрос.
+
+## Разработка
+
+```bash
+npm run dev      # Режим наблюдения
+npm run build    # Продакшн-сборка (вывод в dist/)
+npm run lint     # Проверка ESLint
+npm run lint:fix # Автоматическое исправление
+npm run format   # Форматирование Prettier
+npm test         # Запуск тестов
+npm test:watch   # Тесты в режиме наблюдения
+```
+
+## Структура проекта
+
+- `src/main.ts` — Точка входа плагина
+- `src/storage.ts` — Загрузка/сохранение/переименование данных коллекции
+- `src/network.ts` — Выполнение HTTP запросов
+- `src/preRequests.ts` — Выполнение цепочек запросов
+- `src/importExport.ts` — Импорт/экспорт коллекций
+- `src/types.ts` — TypeScript интерфейсы
+- `src/ui/App.tsx` — Основной React компонент
+- `dist/` — Собранный плагин (main.js, manifest.json, styles.css)

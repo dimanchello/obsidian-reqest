@@ -1,40 +1,40 @@
-import * as React from 'react';
-import { CollectionData, RequestItem } from '../types';
+import * as React from 'react'
+import { RequestItem } from '../types'
 
 export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
 
-    const availableRequests = collectionData.requests.filter((r: RequestItem) => r.id !== request.id && r.itemType !== 'divider');
-    const dependencies: string[] = request.dependencies || [];
+    const availableRequests = collectionData.requests.filter((r: RequestItem) => r.id !== request.id && r.itemType !== 'divider')
+    const dependencies: string[] = request.dependencies || []
 
     const addDependency = (id: string) => {
         if (!dependencies.includes(id)) {
-            onChange({ ...request, dependencies: [...dependencies, id] });
+            onChange({ ...request, dependencies: [...dependencies, id] })
         }
-    };
+    }
 
     const removeDependency = (index: number) => {
-        const newDeps = [...dependencies];
-        newDeps.splice(index, 1);
-        onChange({ ...request, dependencies: newDeps });
-    };
+        const newDeps = [...dependencies]
+        newDeps.splice(index, 1)
+        onChange({ ...request, dependencies: newDeps })
+    }
 
     const moveDependency = (index: number, dir: number) => {
-        if (index + dir < 0 || index + dir >= dependencies.length) return;
-        const newDeps = [...dependencies];
-        const temp = newDeps[index];
-        newDeps[index] = newDeps[index + dir];
-        newDeps[index + dir] = temp;
-        onChange({ ...request, dependencies: newDeps });
-    };
+        if (index + dir < 0 || index + dir >= dependencies.length) return
+        const newDeps = [...dependencies]
+        const temp = newDeps[index]
+        newDeps[index] = newDeps[index + dir]
+        newDeps[index + dir] = temp
+        onChange({ ...request, dependencies: newDeps })
+    }
 
-    const [searchQuery, setSearchQuery] = React.useState('');
-    const [dropdownOpen, setDropdownOpen] = React.useState(false);
+    const [searchQuery, setSearchQuery] = React.useState('')
+    const [dropdownOpen, setDropdownOpen] = React.useState(false)
 
     const filteredRequests = availableRequests.filter((r: RequestItem) => {
-        const nameMatch = (r.name || '').toLowerCase().includes(searchQuery.toLowerCase());
-        const urlMatch = (r.url || '').toLowerCase().includes(searchQuery.toLowerCase());
-        return nameMatch || urlMatch;
-    });
+        const nameMatch = (r.name || '').toLowerCase().includes(searchQuery.toLowerCase())
+        const urlMatch = (r.url || '').toLowerCase().includes(searchQuery.toLowerCase())
+        return nameMatch || urlMatch
+    })
 
     return (
         <div style={{ padding: '10px 0' }}>
@@ -44,13 +44,13 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
 
             <div style={{ marginBottom: '15px', position: 'relative' }}>
                 <input
-                    className="postman-kv-input"
+                    className="obsidian-request-kv-input"
                     type="text"
                     placeholder="Search request to add..."
                     value={searchQuery}
                     onChange={e => {
-                        setSearchQuery(e.target.value);
-                        setDropdownOpen(true);
+                        setSearchQuery(e.target.value)
+                        setDropdownOpen(true)
                     }}
                     onFocus={() => setDropdownOpen(true)}
                     onBlur={() => setTimeout(() => setDropdownOpen(false), 200)}
@@ -63,9 +63,9 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
                                 key={r.id}
                                 style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid var(--background-modifier-border)' }}
                                 onMouseDown={() => {
-                                    addDependency(r.id);
-                                    setSearchQuery('');
-                                    setDropdownOpen(false);
+                                    addDependency(r.id)
+                                    setSearchQuery('')
+                                    setDropdownOpen(false)
                                 }}
                             >
                                 <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
@@ -83,9 +83,9 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
             {dependencies.length > 0 ? (
                 <div style={{ border: '1px solid var(--background-modifier-border)', borderRadius: '4px', overflow: 'hidden' }}>
                     {dependencies.map((depId, i) => {
-                        const depReq = collectionData.requests.find((r: RequestItem) => r.id === depId);
+                        const depReq = collectionData.requests.find((r: RequestItem) => r.id === depId)
                         return (
-                            <div key={depId + i} className="postman-kv-row" style={{ padding: '4px 8px', margin: 0, borderBottom: i < dependencies.length - 1 ? '1px solid var(--background-modifier-border)' : 'none', background: 'var(--background-secondary)', fontSize: '0.9em' }}>
+                            <div key={depId + i} className="obsidian-request-kv-row" style={{ padding: '4px 8px', margin: 0, borderBottom: i < dependencies.length - 1 ? '1px solid var(--background-modifier-border)' : 'none', background: 'var(--background-secondary)', fontSize: '0.9em' }}>
                                 <div style={{ display: 'flex', gap: '2px', marginRight: '10px' }}>
                                     <button className="btn-ghost" style={{ padding: '2px 4px', fontSize: '10px' }} disabled={i === 0} onClick={() => moveDependency(i, -1)}>▲</button>
                                     <button className="btn-ghost" style={{ padding: '2px 4px', fontSize: '10px' }} disabled={i === dependencies.length - 1} onClick={() => moveDependency(i, 1)}>▼</button>
@@ -96,12 +96,12 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
                                 </span>
                                 <button className="btn-ghost" style={{ padding: '2px 6px' }} onClick={() => removeDependency(i)}>✕</button>
                             </div>
-                        );
+                        )
                     })}
                 </div>
             ) : (
                 <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.9em' }}>No dependencies selected.</div>
             )}
         </div>
-    );
-};
+    )
+}

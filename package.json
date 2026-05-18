@@ -1,11 +1,16 @@
 {
-  "name": "obsidian-postman-clone",
+  "name": "obsidian-request",
   "version": "1.0.0",
-  "description": "API request collection plugin for Obsidian like Postman",
-  "main": "main.js",
+  "description": "API request collection plugin for Obsidian",
+  "main": "dist/main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "node esbuild.config.mjs production"
+    "build": "node esbuild.config.mjs production",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
+    "format": "prettier --write 'src/**/*.{ts,tsx,css}'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -14,17 +19,26 @@
     "@types/node": "^16.11.29",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitejs/plugin-react": "^4.2.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.17.3",
+    "eslint": "^8.50.0",
+    "eslint-plugin-react": "^7.33.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jsdom": "^23.0.0",
     "obsidian": "latest",
+    "prettier": "^3.1.0",
     "tslib": "2.4.0",
-    "typescript": "4.9.5"
+    "typescript": "4.9.5",
+    "vitest": "^1.0.0"
   },
   "dependencies": {
+    "form-data": "^4.0.0",
     "jsonpath-plus": "^7.2.0",
     "lucide-react": "^0.294.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "form-data": "^4.0.0"
+    "react-dom": "^18.2.0"
   }
 }
