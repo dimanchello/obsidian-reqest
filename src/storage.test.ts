@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeRequest, DEFAULT_COLLECTION_DATA, getCollectionNameFromNotePath } from './storage'
+import { normalizeRequest, DEFAULT_COLLECTION_DATA, getCollectionNameFromNotePath, getCollectionsDir } from './storage'
 import { DEFAULT_AUTO_HEADERS } from './constants'
 
 describe('normalizeRequest', () => {
@@ -118,5 +118,15 @@ describe('getCollectionNameFromNotePath', () => {
 
     it('should handle deep nested path', () => {
         expect(getCollectionNameFromNotePath('a/b/c/d/DeepNote.md')).toBe('DeepNote')
+    })
+})
+
+describe('getCollectionsDir', () => {
+    it('should build correct path from plugin dir', () => {
+        expect(getCollectionsDir('.obsidian/plugins/obsidian-request')).toBe('.obsidian/plugins/obsidian-request/collections')
+    })
+
+    it('should work with custom config dir', () => {
+        expect(getCollectionsDir('.custom-config/plugins/my-plugin')).toBe('.custom-config/plugins/my-plugin/collections')
     })
 })

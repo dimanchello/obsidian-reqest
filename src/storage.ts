@@ -15,6 +15,10 @@ export function getCollectionNameFromNotePath(notePath: string): string {
     return basename.replace(/\.md$/, '')
 }
 
+export function getCollectionsDir(pluginDir: string): string {
+    return `${pluginDir}/${COLLECTIONS_DIR}`
+}
+
 export function normalizeRequest(req: unknown): RequestItem {
     if (!req) return req as RequestItem
 
@@ -53,19 +57,22 @@ export function normalizeRequest(req: unknown): RequestItem {
     }
 }
 
-async function ensureCollectionsDir(adapter: App['vault']['adapter']): Promise<void> {
-    if (!(await adapter.exists(COLLECTIONS_DIR))) {
-        await adapter.mkdir(COLLECTIONS_DIR)
+async function ensureCollectionsDir(app: App, pluginDir: string): Promise<void> {
+    const adapter = app.vault.adapter
+    const dir = getCollectionsDir(pluginDir)
+
+    if (!(await adapter.exists(dir))) {
+        await adapter.mkdir(dir)
     }
 }
 
-export async function loadCollection(app: App, collectionName: string): Promise<CollectionData> {
+export async function loadCollection(app: App, pluginDir: string, collectionName: string): Promise<CollectionData> {
     const adapter = app.vault.adapter
 
     try {
-        await ensureCollectionsDir(adapter)
+        await ensureCollectionsDir(app, pluginDir)
 
-        const filePath = `${COLLECTIONS_DIR}/${collectionName}.json`
+        const filePath = `${getCollectionsDir(pluginDir)}/${collectionName}.json`
 
         if (await adapter.exists(filePath)) {
             const content = await adapter.read(filePath)
@@ -79,7 +86,7 @@ export async function loadCollection(app: App, collectionName: string): Promise<
         }
 
         const defaultData = { ...DEFAULT_COLLECTION_DATA }
-        await saveCollection(app, collectionName, defaultData)
+        await saveCollection(app, pluginDir, collectionName, defaultData)
         return defaultData
     } catch (e) {
         console.error('Failed to load collection:', e)
@@ -87,13 +94,13 @@ export async function loadCollection(app: App, collectionName: string): Promise<
     }
 }
 
-export async function saveCollection(app: App, collectionName: string, data: CollectionData): Promise<void> {
+export async function saveCollection(app: App, pluginDir: string, collectionName: string, data: CollectionData): Promise<void> {
     const adapter = app.vault.adapter
 
     try {
-        await ensureCollectionsDir(adapter)
+        await ensureCollectionsDir(app, pluginDir)
 
-        const filePath = `${COLLECTIONS_DIR}/${collectionName}.json`
+        const filePath = `${getCollectionsDir(pluginDir)}/${collectionName}.json`
         const jsonString = JSON.stringify(data, null, 2)
         await adapter.write(filePath, jsonString)
     } catch (e) {
@@ -101,14 +108,14 @@ export async function saveCollection(app: App, collectionName: string, data: Col
     }
 }
 
-export async function renameCollection(app: App, oldName: string, newName: string): Promise<void> {
+export async function renameCollection(app: App, pluginDir: string, oldName: string, newName: string): Promise<void> {
     const adapter = app.vault.adapter
 
     try {
-        await ensureCollectionsDir(adapter)
+        await ensureCollectionsDir(app, pluginDir)
 
-        const oldPath = `${COLLECTIONS_DIR}/${oldName}.json`
-        const newPath = `${COLLECTIONS_DIR}/${newName}.json`
+        const oldPath = `${getCollectionsDir(pluginDir)}/${oldName}.json`
+        const newPath = `${getCollectionsDir(pluginDir)}/${newName}.json`
 
         if (await adapter.exists(oldPath)) {
             if (await adapter.exists(newPath)) {
@@ -121,11 +128,11 @@ export async function renameCollection(app: App, oldName: string, newName: strin
     }
 }
 
-export async function deleteCollection(app: App, collectionName: string): Promise<void> {
+export async function deleteCollection(app: App, pluginDir: string, collectionName: string): Promise<void> {
     const adapter = app.vault.adapter
 
     try {
-        const filePath = `${COLLECTIONS_DIR}/${collectionName}.json`
+        const filePath = `${getCollectionsDir(pluginDir)}/${collectionName}.json`
         if (await adapter.exists(filePath)) {
             await adapter.remove(filePath)
         }
