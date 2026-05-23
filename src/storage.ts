@@ -1,5 +1,5 @@
 import { App } from 'obsidian'
-import { CollectionData, RequestItem } from './types'
+import { CollectionData, RequestItem, Variable, ExtractionRule, AuthConfig, RequestSettings } from './types'
 import { DEFAULT_AUTO_HEADERS } from './constants'
 
 export const COLLECTIONS_DIR = 'collections'
@@ -11,7 +11,7 @@ export const DEFAULT_COLLECTION_DATA: CollectionData = {
 }
 
 export function getCollectionNameFromNotePath(notePath: string): string {
-    const basename = notePath.split('/').pop() || notePath
+    const basename = notePath.split('/').pop() ?? notePath
     return basename.replace(/\.md$/, '')
 }
 
@@ -24,36 +24,38 @@ export function normalizeRequest(req: unknown): RequestItem {
 
     const reqAny = req as Record<string, unknown>
 
-    if (reqAny.itemType === 'divider') {
+    if (reqAny.itemType === 'divider' || reqAny.itemType === 'folder') {
         return {
             ...reqAny,
-            itemType: 'divider'
+            itemType: reqAny.itemType
         } as RequestItem
     }
 
-    const headers = (reqAny.headers as any[]) || []
-    const existingAutoKeys = new Set(headers.filter((h: any) => h.auto).map((h: any) => h.key))
+    const headers = (reqAny.headers as Variable[]) ?? []
+    const existingAutoKeys = new Set(headers.filter((h: Variable) => h.auto).map((h: Variable) => h.key))
     const missingAutoHeaders = DEFAULT_AUTO_HEADERS.filter(h => !existingAutoKeys.has(h.key))
     const mergedHeaders = [...missingAutoHeaders, ...headers]
 
     return {
-        id: reqAny.id as string || '',
-        itemType: (reqAny.itemType as 'request' | 'divider') || 'request',
-        name: reqAny.name as string || 'Unnamed Request',
-        method: (reqAny.method as any) || 'GET',
-        url: reqAny.url as string || '',
+        id: reqAny.id as string ?? '',
+        itemType: (reqAny.itemType as 'request' | 'folder') ?? 'request',
+        name: reqAny.name as string ?? 'Unnamed Request',
+        method: (reqAny.method as RequestItem['method']) ?? 'GET',
+        url: reqAny.url as string ?? '',
         headers: mergedHeaders,
-        queryParams: (reqAny.queryParams as any[]) || [],
-        bodyType: (reqAny.bodyType as any) || 'none',
-        bodyRaw: reqAny.bodyRaw as string || '',
-        bodyFormData: (reqAny.bodyFormData as any[]) || [],
-        bodyFormUrlEncoded: (reqAny.bodyFormUrlEncoded as any[]) || [],
-        bodyBinaryPath: reqAny.bodyBinaryPath as string || '',
-        extractionRules: (reqAny.extractionRules as any[]) || [],
-        auth: (reqAny.auth as any) || { type: 'none' },
-        settings: (reqAny.settings as any) || { followRedirects: true, maxRedirects: 5, verifySsl: true },
-        dependencies: (reqAny.dependencies as string[]) || [],
-        localVariables: (reqAny.localVariables as any[]) || []
+        queryParams: (reqAny.queryParams as Variable[]) ?? [],
+        bodyType: (reqAny.bodyType as RequestItem['bodyType']) ?? 'none',
+        bodyRaw: reqAny.bodyRaw as string ?? '',
+        bodyFormData: (reqAny.bodyFormData as RequestItem['bodyFormData']) ?? [],
+        bodyFormUrlEncoded: (reqAny.bodyFormUrlEncoded as Variable[]) ?? [],
+        bodyBinaryPath: reqAny.bodyBinaryPath as string ?? '',
+        extractionRules: (reqAny.extractionRules as ExtractionRule[]) ?? [],
+        auth: (reqAny.auth as AuthConfig) ?? { type: 'none' },
+        settings: (reqAny.settings as RequestSettings) ?? { followRedirects: true, maxRedirects: 5, verifySsl: true },
+        dependencies: (reqAny.dependencies as string[]) ?? [],
+        localVariables: (reqAny.localVariables as Variable[]) ?? [],
+        folderId: reqAny.folderId as string ?? undefined,
+        collapsed: reqAny.collapsed as boolean ?? undefined
     }
 }
 

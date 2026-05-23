@@ -1,8 +1,9 @@
-import { Plugin, TFile, MarkdownPostProcessorContext } from 'obsidian'
+import { Plugin, TFile, MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian'
 import * as React from 'react'
-import { createRoot, Root } from 'react-dom/client'
+import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
-import { loadCollection, saveCollection, renameCollection, deleteCollection, CollectionData, getCollectionNameFromNotePath, getCollectionsDir } from './storage'
+import { loadCollection, saveCollection, renameCollection, deleteCollection, getCollectionNameFromNotePath, getCollectionsDir } from './storage'
+import { CollectionData } from './types'
 
 function hasRequestCollectionBlock(content: string): boolean {
     return /^```request-collection\s*$/m.test(content)
@@ -10,20 +11,21 @@ function hasRequestCollectionBlock(content: string): boolean {
 
 export default class ObsidianRequestPlugin extends Plugin {
     getPluginDir(): string {
-        return this.manifest.dir
+        return this.manifest.dir!
     }
 
     async onload(): Promise<void> {
         this.registerMarkdownCodeBlockProcessor('request-collection', this.handleCodeBlock.bind(this))
 
         this.registerEvent(
-            this.app.vault.on('rename', async (file: TFile, oldPath: string) => {
-                if (file.extension !== 'md') return
-                const content = await this.app.vault.read(file)
+            this.app.vault.on('rename', async (file, oldPath) => {
+                const tf = file as TFile
+                if (tf.extension !== 'md') return
+                const content = await this.app.vault.read(tf)
                 if (!hasRequestCollectionBlock(content)) return
 
                 const oldName = getCollectionNameFromNotePath(oldPath)
-                const newName = getCollectionNameFromNotePath(file.path)
+                const newName = getCollectionNameFromNotePath(tf.path)
                 if (oldName !== newName) {
                     renameCollection(this.app, this.getPluginDir(), oldName, newName)
                 }
@@ -31,12 +33,13 @@ export default class ObsidianRequestPlugin extends Plugin {
         )
 
         this.registerEvent(
-            this.app.vault.on('delete', async (file: TFile) => {
-                if (file.extension !== 'md') return
-                const content = await this.app.vault.read(file)
+            this.app.vault.on('delete', async (file) => {
+                const tf = file as TFile
+                if (tf.extension !== 'md') return
+                const content = await this.app.vault.read(tf)
                 if (!hasRequestCollectionBlock(content)) return
 
-                const collectionName = getCollectionNameFromNotePath(file.path)
+                const collectionName = getCollectionNameFromNotePath(tf.path)
                 const filePath = `${getCollectionsDir(this.getPluginDir())}/${collectionName}.json`
                 const exists = await this.app.vault.adapter.exists(filePath)
                 if (exists) {
@@ -58,21 +61,19 @@ export default class ObsidianRequestPlugin extends Plugin {
         loadCollection(this.app, pluginDir, collectionName).then(data => {
             root.render(
                 React.createElement(App, {
-                    data: data,
+                    data,
                     onSave: async (newData: CollectionData) => {
                         await saveCollection(this.app, pluginDir, collectionName, newData)
                     },
-                    collectionName: collectionName
+                    collectionName
                 })
             )
         })
 
-        ctx.addChild({
-            containerEl: el,
-            load: () => {},
-            unload: () => {
+        ctx.addChild(new (class extends MarkdownRenderChild {
+            onunload() {
                 root.unmount()
             }
-        })
+        })(el))
     }
 }

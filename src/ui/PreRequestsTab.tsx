@@ -1,10 +1,16 @@
 import * as React from 'react'
-import { RequestItem } from '../types'
+import { CollectionData, RequestItem } from '../types'
 
-export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
+interface PreRequestsTabProps {
+    request: RequestItem
+    collectionData: CollectionData
+    onChange: (req: RequestItem) => void
+}
+
+export const PreRequestsTab = ({ request, collectionData, onChange }: PreRequestsTabProps) => {
 
     const availableRequests = collectionData.requests.filter((r: RequestItem) => r.id !== request.id && r.itemType !== 'divider')
-    const dependencies: string[] = request.dependencies || []
+    const dependencies: string[] = request.dependencies ?? []
 
     const addDependency = (id: string) => {
         if (!dependencies.includes(id)) {
@@ -21,8 +27,8 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
     const moveDependency = (index: number, dir: number) => {
         if (index + dir < 0 || index + dir >= dependencies.length) return
         const newDeps = [...dependencies]
-        const temp = newDeps[index]
-        newDeps[index] = newDeps[index + dir]
+        const temp = newDeps[index]!
+        newDeps[index] = newDeps[index + dir]!
         newDeps[index + dir] = temp
         onChange({ ...request, dependencies: newDeps })
     }
@@ -91,7 +97,7 @@ export const PreRequestsTab = ({ request, collectionData, onChange }: any) => {
                                     <button className="btn-ghost" style={{ padding: '2px 4px', fontSize: '10px' }} disabled={i === dependencies.length - 1} onClick={() => moveDependency(i, 1)}>▼</button>
                                 </div>
                                 <span style={{ flex: 1, fontWeight: '600' }}>
-                                    <span style={{ fontSize: '9px', padding: '1px 4px', marginRight: '6px', background: 'var(--background-modifier-border)', borderRadius: '3px' }}>{depReq?.method || 'N/A'}</span>
+                                    <span style={{ fontSize: '9px', padding: '1px 4px', marginRight: '6px', background: 'var(--background-modifier-border)', borderRadius: '3px' }}>{depReq?.method ?? 'N/A'}</span>
                                     {depReq ? depReq.name : 'Unknown Request'}
                                 </span>
                                 <button className="btn-ghost" style={{ padding: '2px 6px' }} onClick={() => removeDependency(i)}>✕</button>

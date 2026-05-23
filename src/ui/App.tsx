@@ -1,7 +1,5 @@
 import * as React from 'react'
-import { JSONPath } from 'jsonpath-plus'
-import { CollectionData, RequestItem, Environment, ExtractionRule, Variable } from '../types'
-import { executeRequest } from '../network'
+import { CollectionData, RequestItem, Environment, ExtractionRule, Variable, AuthConfig, PreRequestLog } from '../types'
 import { importExternalCollection, exportExternalCollection } from '../importExport'
 import { Notice } from 'obsidian'
 import { PreRequestsTab } from './PreRequestsTab'
@@ -14,11 +12,9 @@ interface AppProps {
     collectionName: string
 }
 
-
 const HighlightMatch = ({ text, query }: { text: string, query: string }) => {
     if (!text) return <></>
     if (!query) return <>{text}</>
-    // escape regex chars
     const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'))
     return (
@@ -32,19 +28,21 @@ const HighlightMatch = ({ text, query }: { text: string, query: string }) => {
     )
 }
 
-export const App: React.FC<AppProps> = ({ data, onSave }) => {
+export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
     const [collectionData, setCollectionData] = React.useState<CollectionData>(data)
     const [activeReqId, setActiveReqId] = React.useState<string | null>(
-        data.requests.length > 0 ? data.requests[0].id : null
+        data.requests.length > 0 ? data.requests[0]!.id : null
     )
     const [showEnvManager, setShowEnvManager] = React.useState(false)
     const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
     const [searchQuery, setSearchQuery] = React.useState('')
-    const [sidebarWidth, setSidebarWidth] = React.useState(data.uiSettings?.sidebarWidth || 250)
-    const [draggedItemIndex, setDraggedItemIndex] = React.useState<number | null>(null)
-    const [dragOverIndex, setDragOverIndex] = React.useState<number | null>(null)
-    const [dragPosition, setDragPosition] = React.useState<'top' | 'bottom'>('bottom')
+    const [sidebarWidth, setSidebarWidth] = React.useState(data.uiSettings?.sidebarWidth ?? 250)
+    const [draggedItemId, setDraggedItemId] = React.useState<string | null>(null)
+    const [dropTargetId, setDropTargetId] = React.useState<string | null>(null)
+    const [dropPosition, setDropPosition] = React.useState<'top' | 'bottom'>('bottom')
     const [showExportModal, setShowExportModal] = React.useState(false)
+    const [contextMenu, setContextMenu] = React.useState<{ x: number, y: number, folderId: string } | null>(null)
+    const [editingFolderId, setEditingFolderId] = React.useState<string | null>(null)
 
     React.useEffect(() => {
         setCollectionData(data)
@@ -53,20 +51,27 @@ export const App: React.FC<AppProps> = ({ data, onSave }) => {
         }
     }, [data])
 
-    const startSidebarResizing = React.useCallback((e: any) => {
+    React.useEffect(() => {
+        if (contextMenu) {
+            const handler = () => setContextMenu(null)
+            document.addEventListener('click', handler)
+            return () => document.removeEventListener('click', handler)
+        }
+    }, [contextMenu])
+
+    const startSidebarResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault()
         const startX = e.clientX
         const startWidth = sidebarWidth
 
-        const doDrag = (dragEvent: any) => {
+        const doDrag = (dragEvent: MouseEvent) => {
             const deltaX = dragEvent.clientX - startX
             setSidebarWidth(Math.min(Math.max(startWidth + deltaX, 150), 500))
         }
 
-        const stopDrag = (dragEvent: any) => {
+        const stopDrag = (dragEvent: MouseEvent) => {
             document.removeEventListener('mousemove', doDrag)
             document.removeEventListener('mouseup', stopDrag)
-            // Save the final width to the collection data
             const deltaX = dragEvent.clientX - startX
             const finalWidth = Math.min(Math.max(startWidth + deltaX, 150), 500)
             onSave({ ...collectionData, uiSettings: { ...collectionData.uiSettings, sidebarWidth: finalWidth } })
@@ -83,67 +88,165 @@ export const App: React.FC<AppProps> = ({ data, onSave }) => {
 
     const activeReq = collectionData.requests.find(r => r.id === activeReqId)
 
-    const filteredRequests = React.useMemo(() => {
-        if (!searchQuery) return collectionData.requests
-        const query = searchQuery.toLowerCase()
-        let inMatchingDivider = false
+    const isSearching = searchQuery.length > 0
+    const searchLower = searchQuery.toLowerCase()
 
-        return collectionData.requests.filter(r => {
-            if (r.itemType === 'divider') {
-                const nameMatch = (r.name || '').toLowerCase().includes(query)
-                inMatchingDivider = nameMatch
-                return nameMatch
+    const matchingItemIds = React.useMemo(() => {
+        if (!isSearching) return null
+        const matches = new Set<string>()
+        const requests = collectionData.requests
+
+        for (const req of requests) {
+            const nameMatch = (req.name || '').toLowerCase().includes(searchLower)
+            if (req.itemType === 'folder') {
+                const childrenMatch = requests.some(
+                    r => r.folderId === req.id && (
+                        (r.name || '').toLowerCase().includes(searchLower) ||
+                        (r.url || '').toLowerCase().includes(searchLower)
+                    )
+                )
+                if (nameMatch || childrenMatch) {
+                    matches.add(req.id)
+                    for (const child of requests.filter(r => r.folderId === req.id)) {
+                        matches.add(child.id)
+                    }
+                }
             } else {
-                if (inMatchingDivider) return true
-                const nameMatch = (r.name || '').toLowerCase().includes(query)
-                const urlMatch = (r.url || '').toLowerCase().includes(query)
-                return nameMatch || urlMatch
+                const urlMatch = (req.url || '').toLowerCase().includes(searchLower)
+                if (nameMatch || urlMatch) {
+                    matches.add(req.id)
+                    if (req.folderId) matches.add(req.folderId)
+                }
             }
-        })
+        }
+        return matches
     }, [collectionData.requests, searchQuery])
 
-    const handleDragStart = (index: number) => {
-        setDraggedItemIndex(index)
+    const renderOrder = React.useMemo(() => {
+        const order: { id: string, isFolder?: boolean }[] = []
+
+        if (isSearching) {
+            const matched = new Set(matchingItemIds ?? [])
+            for (const req of collectionData.requests) {
+                if (req.itemType === 'folder' && matched.has(req.id)) {
+                    order.push({ id: req.id, isFolder: true })
+                } else if (matched.has(req.id)) {
+                    order.push({ id: req.id })
+                }
+            }
+        } else {
+            for (const req of collectionData.requests) {
+                if (req.itemType === 'folder') {
+                    order.push({ id: req.id, isFolder: true })
+                } else if (!req.folderId) {
+                    order.push({ id: req.id })
+                }
+            }
+        }
+
+        return order
+    }, [collectionData.requests, matchingItemIds, isSearching])
+
+    const isFolderCollapsed = (folderId: string) => {
+        if (isSearching) return false
+        return collectionData.uiSettings?.folderState?.[folderId] ?? false
     }
 
-    const handleDragOver = (e: React.DragEvent, index: number) => {
-        e.preventDefault()
-        setDragOverIndex(index)
+    const toggleFolder = (folderId: string) => {
+        const currentState = collectionData.uiSettings?.folderState ?? {}
+        const newState = { ...currentState, [folderId]: !currentState[folderId] }
+        handleSave({ ...collectionData, uiSettings: { ...collectionData.uiSettings, folderState: newState } })
+    }
 
-        // Determine if mouse is over top or bottom half of the element
-        const rect = (e.target as HTMLElement).closest('.obsidian-request-request-item, .obsidian-request-divider-item')?.getBoundingClientRect()
+    const handleDragStart = (id: string) => {
+        setDraggedItemId(id)
+    }
+
+    const handleDragOver = (e: React.DragEvent, id: string) => {
+        e.preventDefault()
+        setDropTargetId(id)
+        const rect = (e.target as HTMLElement).closest('.obsidian-request-request-item, .obsidian-request-folder-header')?.getBoundingClientRect()
         if (rect) {
             const midPoint = rect.top + rect.height / 2
-            setDragPosition(e.clientY < midPoint ? 'top' : 'bottom')
+            setDropPosition(e.clientY < midPoint ? 'top' : 'bottom')
         }
     }
 
-    const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    const handleDrop = (e: React.DragEvent, targetId: string) => {
         e.preventDefault()
-        if (draggedItemIndex === null || draggedItemIndex === dropIndex) {
-            setDraggedItemIndex(null)
-            setDragOverIndex(null)
+        if (!draggedItemId || draggedItemId === targetId) {
+            setDraggedItemId(null)
+            setDropTargetId(null)
             return
         }
 
         const newRequests = [...collectionData.requests]
-        const draggedItem = newRequests.splice(draggedItemIndex, 1)[0]
+        const draggedIdx = newRequests.findIndex(r => r.id === draggedItemId)
+        const targetIdx = newRequests.findIndex(r => r.id === targetId)
 
-        let targetIndex = dropIndex
-        if (draggedItemIndex < dropIndex && dragPosition === 'top') {
-            targetIndex -= 1
-        } else if (draggedItemIndex > dropIndex && dragPosition === 'bottom') {
-            targetIndex += 1
+        if (draggedIdx === -1 || targetIdx === -1) {
+            setDraggedItemId(null)
+            setDropTargetId(null)
+            return
         }
 
-        newRequests.splice(targetIndex, 0, draggedItem)
-        handleSave({ ...collectionData, requests: newRequests })
+        const draggedItem = newRequests[draggedIdx]
+        const targetItem = collectionData.requests.find(r => r.id === targetId)
 
-        setDraggedItemIndex(null)
-        setDragOverIndex(null)
+        if (!targetItem) {
+            setDraggedItemId(null)
+            setDropTargetId(null)
+            return
+        }
+
+        // Determine new folderId for dragged item
+        let newFolderId: string | undefined
+        if (draggedItem.itemType === 'folder') {
+            if (targetItem.itemType === 'folder') {
+                newFolderId = targetItem.id
+            } else {
+                newFolderId = targetItem.folderId
+            }
+        } else {
+            if (targetItem.itemType === 'folder') {
+                newFolderId = targetItem.id
+            } else {
+                newFolderId = targetItem.folderId
+            }
+        }
+
+        // If the item is not changing folder and position is not changing, skip
+        const oldFolderId = draggedItem.folderId
+        const newPosition = targetIdx + (dropPosition === 'bottom' ? 1 : 0)
+        const oldPosition = draggedIdx
+
+        if (oldFolderId === newFolderId && oldPosition === newPosition) {
+            setDraggedItemId(null)
+            setDropTargetId(null)
+            return
+        }
+
+        // Update folderId if changed
+        if (oldFolderId !== newFolderId) {
+            draggedItem.folderId = newFolderId
+        }
+
+        // Remove dragged item from its current position
+        newRequests.splice(draggedIdx, 1)
+        // Insert at new position
+        newRequests.splice(newPosition, 0, draggedItem)
+
+        handleSave({ ...collectionData, requests: newRequests })
+        setDraggedItemId(null)
+        setDropTargetId(null)
     }
 
-    const addNewRequest = () => {
+    const handleDragEnd = () => {
+        setDraggedItemId(null)
+        setDropTargetId(null)
+    }
+
+    const addNewRequest = (folderId?: string) => {
         const newReq: RequestItem = {
             id: Date.now().toString(),
             itemType: 'request',
@@ -160,50 +263,102 @@ export const App: React.FC<AppProps> = ({ data, onSave }) => {
             extractionRules: [],
             auth: { type: 'none' },
             settings: { followRedirects: true, maxRedirects: 5, verifySsl: true },
-            dependencies: []
+            dependencies: [],
+            folderId: folderId ?? undefined
         }
         handleSave({ ...collectionData, requests: [...collectionData.requests, newReq] })
         setActiveReqId(newReq.id)
         if (window.innerWidth <= 768) setMobileSidebarOpen(false)
     }
 
-    const addNewDivider = () => {
-        const newReq: any = {
+    const addNewFolder = () => {
+        const newFolder: RequestItem = {
             id: Date.now().toString(),
-            itemType: 'divider',
-            name: 'New Section'
+            itemType: 'folder',
+            name: 'New Folder',
+            method: 'GET',
+            url: '',
+            headers: [],
+            queryParams: [],
+            bodyType: 'none',
+            bodyRaw: '',
+            bodyFormData: [],
+            bodyFormUrlEncoded: [],
+            bodyBinaryPath: '',
+            extractionRules: [],
+            auth: { type: 'none' },
+            settings: { followRedirects: true, maxRedirects: 5, verifySsl: true },
+            dependencies: [],
+            localVariables: []
         }
-        handleSave({ ...collectionData, requests: [...collectionData.requests, newReq] })
+        handleSave({ ...collectionData, requests: [...collectionData.requests, newFolder] })
+    }
+
+    const deleteItem = (reqId: string, e: React.MouseEvent) => {
+        e.stopPropagation()
+        const req = collectionData.requests.find(r => r.id === reqId)
+        if (!req) return
+
+        if (req.itemType === 'folder') {
+            const childCount = collectionData.requests.filter(r => r.folderId === reqId).length
+            if (!confirm(`Delete folder "${req.name}" and all ${childCount} requests inside it?`)) return
+            const newReqs = collectionData.requests.filter(r => r.id !== reqId && r.folderId !== reqId)
+            handleSave({ ...collectionData, requests: newReqs })
+            if (activeReqId === reqId || collectionData.requests.some(r => r.folderId === reqId && r.id === activeReqId)) {
+                setActiveReqId(newReqs.find(r => r.itemType !== 'folder')?.id ?? null)
+            }
+        } else {
+            if (!confirm(`Are you sure you want to delete "${req.name}"?`)) return
+            const newReqs = collectionData.requests.filter(r => r.id !== reqId)
+            handleSave({ ...collectionData, requests: newReqs })
+            if (activeReqId === reqId) setActiveReqId(newReqs.find(r => r.itemType !== 'folder')?.id ?? null)
+        }
+    }
+
+    const handleFolderContextMenu = (e: React.MouseEvent, folderId: string) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const rootEl = (e.currentTarget as HTMLElement).closest('.obsidian-request-root')
+        if (!rootEl) return
+        const rootRect = rootEl.getBoundingClientRect()
+        const menuWidth = 200
+        const menuHeight = 120
+        let x = e.clientX - rootRect.left
+        let y = e.clientY - rootRect.top
+        const rootWidth = rootRect.width
+        const rootHeight = rootRect.height
+        if (x + menuWidth > rootWidth) x = rootWidth - menuWidth
+        if (x < 0) x = 0
+        if (y + menuHeight > rootHeight) y = rootHeight - menuHeight
+        if (y < 0) y = 0
+        setContextMenu({ x, y, folderId })
     }
 
     const handleImport = async () => {
         try {
-            const electron = (window as any).require('electron')
-            const fs = (window as any).require('fs')
+            const win = window as { require: (mod: string) => unknown }
+            const electron = win.require('electron') as { remote: { dialog: { showOpenDialog: (opts: Record<string, unknown>) => Promise<{ canceled: boolean; filePaths: string[] }> } } }
+            const fs = win.require('fs') as { readFileSync: (path: string, encoding: string) => string }
             const result = await electron.remote.dialog.showOpenDialog({
                 properties: ['openFile'],
                 filters: [{ name: 'JSON', extensions: ['json'] }]
             })
 
             if (!result.canceled && result.filePaths.length > 0) {
-                const content = fs.readFileSync(result.filePaths[0], 'utf8')
+                const content = fs.readFileSync(result.filePaths[0]!, 'utf8')
 
-                // Determine format
                 try {
                     const parsed = JSON.parse(content)
                     if (parsed.requests && Array.isArray(parsed.requests) && parsed.environments) {
-                        // Obsidian Native Format
-                        const nativeReqs = parsed.requests.map((r: any) => {
-                            // Ensure new IDs to avoid conflicts
+                        const nativeReqs = parsed.requests.map((r: Record<string, unknown>) => {
                             return { ...r, id: Date.now().toString() + Math.random().toString(36).substring(7) }
                         })
                         handleSave({ ...collectionData, requests: [...collectionData.requests, ...nativeReqs] })
                         new Notice(`Successfully imported ${nativeReqs.length} requests in native format!`)
                         return
                     }
-                } catch(e) {}
+                } catch { /* empty */ }
 
-                // Fallback to external format
                 const importedRequests = importExternalCollection(content)
                 if (importedRequests.length > 0) {
                     handleSave({ ...collectionData, requests: [...collectionData.requests, ...importedRequests] })
@@ -212,8 +367,8 @@ export const App: React.FC<AppProps> = ({ data, onSave }) => {
                     new Notice('No requests found in the imported file.')
                 }
             }
-        } catch (err: any) {
-            new Notice(`Import failed: ${err.message}`)
+        } catch (err: unknown) {
+            new Notice(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
         }
     }
 
@@ -240,216 +395,332 @@ export const App: React.FC<AppProps> = ({ data, onSave }) => {
             document.body.removeChild(a)
             URL.revokeObjectURL(url)
             new Notice('Collection exported successfully!')
-        } catch(e) {
+        } catch {
             new Notice('Export failed!')
         }
         setShowExportModal(false)
     }
 
+    const saveFolderName = (folderId: string, newName: string) => {
+        const newRequests = collectionData.requests.map(r =>
+            r.id === folderId ? { ...r, name: newName } : r
+        )
+        handleSave({ ...collectionData, requests: newRequests })
+        setEditingFolderId(null)
+    }
+
+
+
+    const renderRequestItem = (req: RequestItem, depth: number, _index: number) => {
+        const isDragOver = dropTargetId === req.id
+        const dragClass = isDragOver ? (dropPosition === 'top' ? 'drag-over-top' : 'drag-over') : ''
+
+        return (
+            <div key={req.id}
+                draggable
+                onDragStart={() => handleDragStart(req.id)}
+                onDragOver={(e) => handleDragOver(e, req.id)}
+                onDrop={(e) => handleDrop(e, req.id)}
+                onDragEnd={handleDragEnd}
+                onClick={() => { setActiveReqId(req.id); if (window.innerWidth <= 768) setMobileSidebarOpen(false) }}
+                className={`obsidian-request-request-item ${activeReqId === req.id ? 'active' : ''} ${dragClass}`}
+                style={{ marginLeft: `${depth * 16}px` }}>
+                <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                    <span className={`obsidian-request-method-badge method-${req.method}`}>{req.method}</span>
+                    <span style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><HighlightMatch text={req.name} query={searchQuery} /></span>
+                </div>
+                <button className="btn-ghost" onClick={(e) => deleteItem(req.id, e)}>×</button>
+            </div>
+        )
+    }
+
+    const renderFolderItem = (folder: RequestItem) => {
+        const collapsed = isFolderCollapsed(folder.id)
+        const isDragOver = dropTargetId === folder.id
+        const dragClass = isDragOver ? (dropPosition === 'top' ? 'drag-over-top' : 'drag-over') : ''
+        const isEditing = editingFolderId === folder.id
+
+        return (
+            <div key={folder.id} className={`obsidian-request-folder-container ${collapsed ? 'collapsed' : ''}`}>
+                <div
+                    draggable
+                    onDragStart={isEditing ? (e) => e.preventDefault() : () => handleDragStart(folder.id)}
+                    onDragOver={(e) => handleDragOver(e, folder.id)}
+                    onDrop={(e) => handleDrop(e, folder.id)}
+                    onDragEnd={handleDragEnd}
+                    onContextMenu={(e) => handleFolderContextMenu(e, folder.id)}
+                    className={`obsidian-request-folder-header ${activeReqId === folder.id ? 'active' : ''} ${dragClass}`}
+                    onClick={(e) => { e.stopPropagation(); toggleFolder(folder.id) }}
+                >
+                    <span className="obsidian-request-folder-toggle">
+                        {collapsed ? '📂' : '📁'}
+                    </span>
+                    {isEditing ? (
+                        <FolderNameEditor
+                            folder={folder}
+                            onSave={(name) => saveFolderName(folder.id, name)}
+                            onCancel={() => setEditingFolderId(null)}
+                        />
+                    ) : (
+                        <span
+                            className="obsidian-request-folder-name"
+                            onDoubleClick={(e) => {
+                                e.stopPropagation()
+                                setEditingFolderId(folder.id)
+                            }}
+                        >
+                            <HighlightMatch text={folder.name} query={searchQuery} />
+                        </span>
+                    )}
+                    <button className="btn-ghost obsidian-request-folder-delete" onClick={(e) => { e.stopPropagation(); deleteItem(folder.id, e) }}>×</button>
+                </div>
+                <div className="obsidian-request-folder-children">
+                    {collectionData.requests
+                        .filter(r => r.folderId === folder.id && r.itemType !== 'folder')
+                        .map(child => renderRequestItem(child, 1, 0))}
+                </div>
+            </div>
+        )
+    }
+
     return (
-        <div className="obsidian-request-root">
-            <div className={`obsidian-request-sidebar ${mobileSidebarOpen ? 'mobile-open' : ''}`} style={{ width: window.innerWidth > 768 ? `${sidebarWidth}px` : undefined }}>
-                <div className="obsidian-request-sidebar-header">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Environment</label>
-                        <button className="btn-ghost" style={{ padding: '2px 5px', fontSize: '11px' }} onClick={() => setShowEnvManager(true)}>
+        <>
+            <div className="obsidian-request-root">
+                <div className={`obsidian-request-sidebar ${mobileSidebarOpen ? 'mobile-open' : ''}`} style={{ width: window.innerWidth > 768 ? `${sidebarWidth}px` : undefined }}>
+                    <div className="obsidian-request-sidebar-header">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Environment</label>
+                            <button className="btn-ghost" style={{ padding: '2px 5px', fontSize: '11px' }} onClick={() => setShowEnvManager(true)}>
                             ⚙️
-                        </button>
+                            </button>
+                        </div>
+                        <select
+                            style={{ width: '100%', background: 'var(--background-modifier-form-field)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '5px', borderRadius: '4px' }}
+                            value={collectionData.activeEnvironmentId ?? ''}
+                            onChange={(e) => handleSave({ ...collectionData, activeEnvironmentId: e.target.value })}
+                        >
+                            {collectionData.environments.map((env: Environment) => (
+                                <option key={env.id} value={env.id}>{env.name}</option>
+                            ))}
+                        </select>
                     </div>
-                    <select
-                        style={{ width: '100%', background: 'var(--background-modifier-form-field)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '5px', borderRadius: '4px' }}
-                        value={collectionData.activeEnvironmentId || ''}
-                        onChange={(e) => handleSave({ ...collectionData, activeEnvironmentId: e.target.value })}
-                    >
-                        {collectionData.environments.map((env: Environment) => (
-                            <option key={env.id} value={env.id}>{env.name}</option>
-                        ))}
-                    </select>
+
+                    <div style={{ padding: '10px', position: 'relative' }}>
+                        <input
+                            type="text"
+                            placeholder="Search requests..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery('') }}
+                            style={{ width: '100%', background: 'var(--background-modifier-form-field)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '5px', borderRadius: '4px', fontSize: '12px' }}
+                        />
+                        {searchQuery && (
+                            <button
+                                className="btn-ghost"
+                                style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', padding: '2px 4px', fontSize: '10px' }}
+                                onClick={() => setSearchQuery('')}
+                            >
+                            ✕
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="obsidian-request-request-list">
+                        {renderOrder.map((item) => {
+                            const req = collectionData.requests.find(r => r.id === item.id)
+                            if (!req) return null
+                            if (item.isFolder) {
+                                return renderFolderItem(req)
+                            }
+                            return renderRequestItem(req, 0, 0)
+                        })}
+
+                        <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
+                            <button style={{ flex: 2, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={() => addNewRequest()}>
+                            + Request
+                            </button>
+                            <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={addNewFolder}>
+                            + Folder
+                            </button>
+                        </div>
+                        <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
+                            <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={handleImport}>Import</button>
+                            <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={() => setShowExportModal(true)}>Export</button>
+                        </div>
+                    </div>
                 </div>
 
-                <div style={{ padding: '10px', position: 'relative' }}>
-                    <input
-                        type="text"
-                        placeholder="Search requests..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery('') }}
-                        style={{ width: '100%', background: 'var(--background-modifier-form-field)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '5px', borderRadius: '4px', fontSize: '12px' }}
-                    />
-                    {searchQuery && (
-                        <button
-                            className="btn-ghost"
-                            style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', padding: '2px 4px', fontSize: '10px' }}
-                            onClick={() => setSearchQuery('')}
-                        >
-                            ✕
-                        </button>
+                {window.innerWidth > 768 && <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing}></div>}
+
+                <div className="obsidian-request-main">
+                    <div className="obsidian-request-mobile-header">
+                        <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>☰</button>
+                        <span style={{ fontWeight: 'bold' }}>API Collection</span>
+                    </div>
+
+                    {activeReq?.itemType === 'folder' ? (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                        Select a request to edit.
+                        </div>
+                    ) : activeReq ? (
+                        <RequestEditor
+                            request={activeReq}
+                            collectionData={collectionData}
+                            onChange={(updatedReq: RequestItem) => {
+                                const newRequests = collectionData.requests.map(r => r.id === updatedReq.id ? updatedReq : r)
+                                handleSave({ ...collectionData, requests: newRequests })
+                            }}
+                            onExtract={(envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => {
+                                if (isLocal && localReqId) {
+                                    const newRequests = collectionData.requests.map(r => {
+                                        if (r.id === localReqId) {
+                                            const newVars = [...(r.localVariables ?? [])]
+                                            const existingVarIndex = newVars.findIndex(v => v.key === key)
+                                            if (existingVarIndex >= 0) {
+                                                newVars[existingVarIndex] = { ...newVars[existingVarIndex]!, value }
+                                            } else {
+                                                newVars.push({ key, value, enabled: true })
+                                            }
+                                            return { ...r, localVariables: newVars }
+                                        }
+                                        return r
+                                    })
+                                    handleSave({ ...collectionData, requests: newRequests })
+                                } else {
+                                    const newEnvs = collectionData.environments.map(e => {
+                                        if (e.id === envId) {
+                                            const existingVarIndex = e.variables.findIndex(v => v.key === key)
+                                            const newVars = [...e.variables]
+                                            if (existingVarIndex >= 0) {
+                                                newVars[existingVarIndex] = { ...newVars[existingVarIndex]!, value }
+                                            } else {
+                                                newVars.push({ key, value, enabled: true })
+                                            }
+                                            return { ...e, variables: newVars }
+                                        }
+                                        return e
+                                    })
+                                    handleSave({ ...collectionData, environments: newEnvs })
+                                }
+                            }}
+                        />
+                    ) : (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+                        Select or create a request.
+                        </div>
                     )}
                 </div>
 
-                <div className="obsidian-request-request-list">
-                    {filteredRequests.map((req: RequestItem, index: number) => {
-                        const isDragOver = dragOverIndex === index
-                        const dragClass = isDragOver ? (dragPosition === 'top' ? 'drag-over-top' : 'drag-over') : ''
+                {showEnvManager && (
+                    <EnvironmentManager collectionData={collectionData} onSave={handleSave} onClose={() => setShowEnvManager(false)} />
+                )}
 
-                        if (req.itemType === 'divider') {
-                            return (
-                                <DividerItem
-                                    key={req.id}
-                                    req={req}
-                                    index={index}
-                                    dragClass={dragClass}
-                                    searchQuery={searchQuery}
-                                    handleDragStart={handleDragStart}
-                                    handleDragOver={handleDragOver}
-                                    handleDrop={handleDrop}
-                                    handleDragEnd={() => { setDraggedItemIndex(null); setDragOverIndex(null) }}
-                                    onChange={(newName: string) => {
-                                        const newRequests = [...collectionData.requests]
-                                        const idx = newRequests.findIndex(r => r.id === req.id)
-                                        if (idx >= 0) newRequests[idx].name = newName
-                                        handleSave({ ...collectionData, requests: newRequests })
-                                    }}
-                                    onDelete={() => {
-                                        const newReqs = collectionData.requests.filter(r => r.id !== req.id)
-                                        handleSave({ ...collectionData, requests: newReqs })
-                                    }}
-                                />
-                            )
-                        }
+                {showExportModal && (
+                    <div className="obsidian-request-modal-overlay" onClick={() => setShowExportModal(false)}>
+                        <div className="obsidian-request-modal" style={{ width: '400px', height: 'auto', padding: '20px' }} onClick={e => e.stopPropagation()}>
+                            <h3 style={{ marginTop: 0 }}>Export Collection</h3>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>Select the format you want to export your collection in:</p>
 
-                        return (
-                            <div key={req.id}
-                                draggable
-                                onDragStart={() => handleDragStart(index)}
-                                onDragOver={(e) => handleDragOver(e, index)}
-                                onDrop={(e) => handleDrop(e, index)}
-                                onDragEnd={() => { setDraggedItemIndex(null); setDragOverIndex(null) }}
-                                onClick={() => { setActiveReqId(req.id); if (window.innerWidth <= 768) setMobileSidebarOpen(false) }}
-                                className={`obsidian-request-request-item ${activeReqId === req.id ? 'active' : ''} ${dragClass}`}>
-                                <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-                                    <span className={`obsidian-request-method-badge method-${req.method}`}>{req.method}</span>
-                                    <span style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><HighlightMatch text={req.name} query={searchQuery} /></span>
-                                </div>
-                                <button className="btn-ghost" onClick={(e) => {
-                                    e.stopPropagation()
-                                    if (confirm(`Are you sure you want to delete "${req.name}"?`)) {
-                                        const newReqs = collectionData.requests.filter(r => r.id !== req.id)
-                                        handleSave({ ...collectionData, requests: newReqs })
-                                        if (activeReqId === req.id) setActiveReqId(newReqs.find(r => r.itemType !== 'divider')?.id || null)
-                                    }
-                                }}>×</button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
+                                <button
+                                    style={{ background: 'var(--interactive-accent)', color: 'var(--text-on-accent)', border: 'none', padding: '10px', borderRadius: '4px', cursor: 'pointer' }}
+                                    onClick={() => handleExport('external')}
+                                >
+                                External Collection (v2.1.0)
+                                </button>
+                                <button
+                                    style={{ background: 'var(--background-secondary)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '10px', borderRadius: '4px', cursor: 'pointer' }}
+                                    onClick={() => handleExport('native')}
+                                >
+                                Obsidian Native Format
+                                </button>
                             </div>
-                        )
-                    })}
-                    <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-                        <button style={{ flex: 2, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={addNewRequest}>
-                            + Request
-                        </button>
-                        <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={addNewDivider}>
-                            + Divider
-                        </button>
-                    </div>
-                    <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-                        <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={handleImport}>Import</button>
-                        <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={() => setShowExportModal(true)}>Export</button>
-                    </div>
-                </div>
-            </div>
-
-            {window.innerWidth > 768 && <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing}></div>}
-
-            <div className="obsidian-request-main">
-                <div className="obsidian-request-mobile-header">
-                    <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>☰</button>
-                    <span style={{ fontWeight: 'bold' }}>API Collection</span>
-                </div>
-
-                {activeReq?.itemType === 'divider' ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                        This is a visual divider. Select a request to edit.
-                    </div>
-                ) : activeReq ? (
-                    <RequestEditor
-                        request={activeReq}
-                        collectionData={collectionData}
-                        onChange={(updatedReq: RequestItem) => {
-                            const newRequests = collectionData.requests.map(r => r.id === updatedReq.id ? updatedReq : r)
-                            handleSave({ ...collectionData, requests: newRequests })
-                        }}
-                        onExtract={(envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => {
-                            if (isLocal && localReqId) {
-                                const newRequests = collectionData.requests.map(r => {
-                                    if (r.id === localReqId) {
-                                        const newVars = [...(r.localVariables || [])]
-                                        const existingVarIndex = newVars.findIndex(v => v.key === key)
-                                        if (existingVarIndex >= 0) {
-                                            newVars[existingVarIndex] = { ...newVars[existingVarIndex], value }
-                                        } else {
-                                            newVars.push({ key, value, enabled: true })
-                                        }
-                                        return { ...r, localVariables: newVars }
-                                    }
-                                    return r
-                                })
-                                handleSave({ ...collectionData, requests: newRequests })
-                            } else {
-                                const newEnvs = collectionData.environments.map(e => {
-                                    if (e.id === envId) {
-                                        const existingVarIndex = e.variables.findIndex(v => v.key === key)
-                                        const newVars = [...e.variables]
-                                        if (existingVarIndex >= 0) {
-                                            newVars[existingVarIndex] = { ...newVars[existingVarIndex], value: value }
-                                        } else {
-                                            newVars.push({ key, value, enabled: true })
-                                        }
-                                        return { ...e, variables: newVars }
-                                    }
-                                    return e
-                                })
-                                handleSave({ ...collectionData, environments: newEnvs })
-                            }
-                        }}
-                    />
-                ) : (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                        Select or create a request.
+                        </div>
                     </div>
                 )}
             </div>
 
-            {showEnvManager && (
-                <EnvironmentManager collectionData={collectionData} onSave={handleSave} onClose={() => setShowEnvManager(false)} />
-            )}
-
-            {showExportModal && (
-                <div className="obsidian-request-modal-overlay" onClick={() => setShowExportModal(false)}>
-                    <div className="obsidian-request-modal" style={{ width: '400px', height: 'auto', padding: '20px' }} onClick={e => e.stopPropagation()}>
-                        <h3 style={{ marginTop: 0 }}>Export Collection</h3>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>Select the format you want to export your collection in:</p>
-
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
-                            <button
-                                style={{ background: 'var(--interactive-accent)', color: 'var(--text-on-accent)', border: 'none', padding: '10px', borderRadius: '4px', cursor: 'pointer' }}
-                                onClick={() => handleExport('external')}
-                            >
-                                External Collection (v2.1.0)
-                            </button>
-                            <button
-                                style={{ background: 'var(--background-secondary)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '10px', borderRadius: '4px', cursor: 'pointer' }}
-                                onClick={() => handleExport('native')}
-                            >
-                                Obsidian Native Format
-                            </button>
-                        </div>
-                    </div>
+            {contextMenu && (
+                <div
+                    className="obsidian-request-context-menu"
+                    style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <button
+                        className="obsidian-request-context-menu-item"
+                        onClick={() => { addNewRequest(contextMenu.folderId); setContextMenu(null) }}
+                    >
+                        Create Request in Folder
+                    </button>
+                    <button
+                        className="obsidian-request-context-menu-item"
+                        onClick={() => {
+                            setEditingFolderId(contextMenu.folderId)
+                            setContextMenu(null)
+                        }}
+                    >
+                        Rename Folder
+                    </button>
+                    <button
+                        className="obsidian-request-context-menu-item"
+                        onClick={() => { deleteItem(contextMenu.folderId, { stopPropagation: () => {} } as unknown as React.MouseEvent); setContextMenu(null) }}
+                    >
+                        Delete Folder
+                    </button>
                 </div>
             )}
-        </div>
+        </>
     )
 }
 
-const EnvironmentManager = ({ collectionData, onSave, onClose }: any) => {
+const FolderNameEditor = ({ folder, onSave, onCancel }: { folder: RequestItem, onSave: (name: string) => void, onCancel: () => void }) => {
+    const spanRef = React.useRef<HTMLSpanElement>(null)
+
+    React.useEffect(() => {
+        const span = spanRef.current
+        if (span) {
+            span.focus()
+            const range = document.createRange()
+            range.selectNodeContents(span)
+            const sel = window.getSelection()
+            if (sel) {
+                sel.removeAllRanges()
+                sel.addRange(range)
+            }
+        }
+    }, [])
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            spanRef.current?.blur()
+        } else if (e.key === 'Escape') {
+            if (spanRef.current) spanRef.current.textContent = folder.name
+            onCancel()
+        }
+    }
+
+    const handleBlur = () => {
+        const newName = spanRef.current?.textContent ?? folder.name
+        onSave(newName)
+    }
+
+    return (
+        <span
+            ref={spanRef}
+            className="obsidian-request-folder-name"
+            contentEditable
+            suppressContentEditableWarning
+            onClick={(e) => e.stopPropagation()}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+        >
+            {folder.name}
+        </span>
+    )
+}
+
+const EnvironmentManager = ({ collectionData, onSave, onClose }: { collectionData: CollectionData, onSave: (data: CollectionData) => void, onClose: () => void }) => {
     const [activeEnvId, setActiveEnvId] = React.useState(collectionData.environments[0]?.id)
 
     const activeEnv = collectionData.environments.find((e: Environment) => e.id === activeEnvId)
@@ -506,13 +777,13 @@ const EnvironmentManager = ({ collectionData, onSave, onClose }: any) => {
                                 {activeEnv.variables.map((v: Variable, i: number) => (
                                     <div key={i} className="obsidian-request-kv-row">
                                         <input type="checkbox" checked={v.enabled} onChange={(e) => {
-                                            const newVars = [...activeEnv.variables]; newVars[i].enabled = e.target.checked; handleEnvChange({ ...activeEnv, variables: newVars })
+                                            const newVars = [...activeEnv.variables]; newVars[i]!.enabled = e.target.checked; handleEnvChange({ ...activeEnv, variables: newVars })
                                         }}/>
                                         <input className="obsidian-request-kv-input" style={{ flex: 1 }} placeholder="Variable key" value={v.key} onChange={(e) => {
-                                            const newVars = [...activeEnv.variables]; newVars[i].key = e.target.value; handleEnvChange({ ...activeEnv, variables: newVars })
+                                            const newVars = [...activeEnv.variables]; newVars[i]!.key = e.target.value; handleEnvChange({ ...activeEnv, variables: newVars })
                                         }}/>
                                         <input className="obsidian-request-kv-input" style={{ flex: 2 }} placeholder="Initial value" value={v.value} onChange={(e) => {
-                                            const newVars = [...activeEnv.variables]; newVars[i].value = e.target.value; handleEnvChange({ ...activeEnv, variables: newVars })
+                                            const newVars = [...activeEnv.variables]; newVars[i]!.value = e.target.value; handleEnvChange({ ...activeEnv, variables: newVars })
                                         }}/>
                                         <button className="btn-ghost" onClick={() => {
                                             const newVars = [...activeEnv.variables]; newVars.splice(i, 1); handleEnvChange({ ...activeEnv, variables: newVars })
@@ -533,7 +804,7 @@ const EnvironmentManager = ({ collectionData, onSave, onClose }: any) => {
     )
 }
 
-const HighlightedInput = ({ value, onChange, className, style, placeholder, collectionData }: any) => {
+const HighlightedInput = ({ value, onChange, className, style, placeholder, collectionData }: { value: string, onChange: (val: string) => void, className?: string, style?: React.CSSProperties, placeholder?: string, collectionData: CollectionData }) => {
     const [isEditing, setIsEditing] = React.useState(false)
     const inputRef = React.useRef<HTMLInputElement>(null)
 
@@ -589,59 +860,13 @@ const HighlightedInput = ({ value, onChange, className, style, placeholder, coll
 
     return (
         <div
-            className={`obsidian-request-highlighted-input-container ${className || ''}`}
+            className={`obsidian-request-highlighted-input-container ${className ?? ''}`}
             style={style}
             onClick={() => setIsEditing(true)}
         >
             <div className="obsidian-request-highlighted-input-display">
                 {renderHighlightedText()}
             </div>
-        </div>
-    )
-}
-
-const DividerItem = ({ req, index, dragClass, searchQuery, handleDragStart, handleDragOver, handleDrop, handleDragEnd, onChange, onDelete }: any) => {
-    const [localName, setLocalName] = React.useState(req.name)
-
-    React.useEffect(() => {
-        setLocalName(req.name)
-    }, [req.id, req.name])
-
-    return (
-        <div
-            draggable
-            onDragStart={() => handleDragStart(index)}
-            onDragOver={(e) => handleDragOver(e, index)}
-            onDrop={(e) => handleDrop(e, index)}
-            onDragEnd={handleDragEnd}
-            className={`obsidian-request-divider-item ${dragClass}`}
-        >
-            <div className="obsidian-request-divider-item-line"></div>
-            <div className="obsidian-request-divider-input-wrapper" style={{ position: 'relative', background: 'var(--background-secondary)', zIndex: 1, padding: '0 5px' }}>
-                {/* Visual layer for highlighting */}
-                <div style={{
-                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                    pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em'
-                }}>
-                    <HighlightMatch text={localName} query={searchQuery} />
-                </div>
-                {/* Actual input for editing */}
-                <input
-                    className="obsidian-request-divider-input"
-                    value={localName}
-                    onChange={(e) => setLocalName(e.target.value)}
-                    onBlur={() => { if (localName !== req.name) onChange(localName) }}
-                    onKeyDown={(e) => { if(e.key === 'Enter') { e.currentTarget.blur() } }}
-                    title={localName}
-                    style={{ color: 'transparent', background: 'transparent', caretColor: 'var(--text-normal)' }}
-                />
-            </div>
-            <div className="obsidian-request-divider-item-line"></div>
-            <button className="btn-ghost" style={{ padding: '0 4px', fontSize: '10px', marginLeft: '5px', opacity: 0.5 }} onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
-            }}>×</button>
         </div>
     )
 }
@@ -688,13 +913,13 @@ const RawBodyEditor = ({ value, onChange }: { value: string, onChange: (val: str
     )
 }
 
-const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) => {
+const RequestEditor = ({ request, collectionData, onChange, onExtract }: { request: RequestItem, collectionData: CollectionData, onChange: (req: RequestItem) => void, onExtract: (envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => void }) => {
     const [activeTab, setActiveTab] = React.useState('Params')
-    const [response, setResponse] = React.useState<any>(null)
+    const [response, setResponse] = React.useState<{ response?: { status: number | undefined, text: string, contentType?: string, headers: Record<string, string | string[] | undefined>, isBinary?: boolean, arrayBuffer?: ArrayBuffer }, error?: string, timeMs?: number, logs?: PreRequestLog[] } | null>(null)
     const [loading, setLoading] = React.useState(false)
     const [loadingStatus, setLoadingStatus] = React.useState<string>('')
     const [responseMode, setResponseMode] = React.useState<'raw' | 'preview'>('raw')
-    const [responseHeight, setResponseHeight] = React.useState(35) // Percentage
+    const [responseHeight, setResponseHeight] = React.useState(35)
     const [responseSubTab, setResponseSubTab] = React.useState<'Body' | 'Headers' | 'Cookies' | 'Pre-req Logs'>('Body')
 
     const [localName, setLocalName] = React.useState(request.name)
@@ -704,13 +929,13 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
         setLocalName(request.name)
     }, [request.id, request.name])
 
-    const startResizing = React.useCallback((e: any) => {
+    const startResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault()
         const startY = e.clientY
         const startHeight = responseHeight
-        const containerHeight = document.querySelector('.obsidian-request-main')?.clientHeight || 1000
+        const containerHeight = (document.querySelector('.obsidian-request-main') as HTMLElement | null)?.clientHeight ?? 1000
 
-        const doDrag = (dragEvent: any) => {
+        const doDrag = (dragEvent: MouseEvent) => {
             const deltaY = startY - dragEvent.clientY
             const deltaPercent = (deltaY / containerHeight) * 100
             setResponseHeight(Math.min(Math.max(startHeight + deltaPercent, 10), 85))
@@ -730,36 +955,32 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
         setLoadingStatus('')
         setResponse(null)
         try {
-            // executeWithDependencies handles the flat dependencies sequentially,
-            // then calls executeRequest on the main request.
             const res = await executeWithDependencies(request.id, collectionData, onExtract, (status) => setLoadingStatus(status))
-            setResponse(res)
-        } catch (e: any) {
-            setResponse({ error: e.message })
+            setResponse(res as typeof response)
+        } catch (e: unknown) {
+            setResponse({ error: e instanceof Error ? e.message : String(e) })
         }
         setLoading(false)
         setLoadingStatus('')
     }
 
-    const updateVariableList = (listKey: 'queryParams' | 'headers' | 'bodyFormUrlEncoded', index: number, field: string, value: any) => {
+    const updateVariableList = (listKey: 'queryParams' | 'headers' | 'bodyFormUrlEncoded', index: number, field: string, value: string | boolean) => {
         const newList = [...request[listKey]]
-        newList[index] = { ...newList[index], [field]: value }
+        newList[index] = { ...newList[index]!, [field]: value }
 
         const updatedReq = { ...request, [listKey]: newList }
 
-        // Sync URL if Query Params changed
         if (listKey === 'queryParams') {
             try {
-                // We only do a basic reconstruction if it's a valid URL or just a path
-                const baseUrl = updatedReq.url.split('?')[0]
-                const activeParams = newList.filter((p: any) => p.enabled && p.key)
+                const baseUrl = updatedReq.url.split('?')[0] ?? ''
+                const activeParams = newList.filter((p: Variable) => p.enabled && p.key)
                 if (activeParams.length > 0) {
-                    const qs = activeParams.map((p: any) => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join('&')
+                    const qs = activeParams.map((p: Variable) => `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`).join('&')
                     updatedReq.url = `${baseUrl}?${qs}`
                 } else {
                     updatedReq.url = baseUrl
                 }
-            } catch (e) {}
+            } catch { /* empty */ }
         }
 
         onChange(updatedReq)
@@ -768,34 +989,33 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
     const handleUrlChange = (newUrl: string) => {
         const updatedReq = { ...request, url: newUrl }
         try {
-            // Very basic URL parser that splits by ? to extract query params
             const parts = newUrl.split('?')
             if (parts.length > 1) {
-                const qs = parts[1]
+                const qs = parts[1] ?? ''
                 const pairs = qs.split('&')
                 const newParams: Variable[] = pairs.map(pair => {
                     const [k, v] = pair.split('=')
-                    return { key: decodeURIComponent(k || ''), value: decodeURIComponent(v || ''), enabled: true }
+                    return { key: decodeURIComponent(k ?? ''), value: decodeURIComponent(v ?? ''), enabled: true }
                 }).filter(p => p.key)
                 updatedReq.queryParams = newParams
             } else {
                 updatedReq.queryParams = []
             }
-        } catch (e) {}
+        } catch { /* empty */ }
         onChange(updatedReq)
     }
 
     const [showHiddenHeaders, setShowHiddenHeaders] = React.useState(false)
 
     const renderVariableList = (listKey: 'queryParams' | 'headers' | 'bodyFormUrlEncoded') => {
-        const items = request[listKey] || []
-        const normalItems = listKey === 'headers' ? items.filter((i: any) => !i.auto) : items
-        const autoItems = listKey === 'headers' ? items.filter((i: any) => i.auto) : []
+        const items = request[listKey] ?? []
+        const normalItems = listKey === 'headers' ? items.filter((i: Variable) => !i.auto) : items
+        const autoItems = listKey === 'headers' ? items.filter((i: Variable) => i.auto) : []
 
         return (
             <div>
-                {normalItems.map((item: Variable, i: number) => {
-                    const actualIndex = items.findIndex((orig: any) => orig === item)
+                {normalItems.map((item: Variable, _: number) => {
+                    const actualIndex = items.findIndex((orig: Variable) => orig === item)
                     return (
                         <div key={actualIndex} className="obsidian-request-kv-row">
                             <input type="checkbox" checked={item.enabled} onChange={(e) => updateVariableList(listKey, actualIndex, 'enabled', e.target.checked)} />
@@ -828,8 +1048,8 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                         </button>
                         {showHiddenHeaders && (
                             <div style={{ marginTop: '10px', opacity: 0.8 }}>
-                                {autoItems.map((item: Variable, i: number) => {
-                                    const actualIndex = items.findIndex((orig: any) => orig === item)
+                                {autoItems.map((item: Variable, _: number) => {
+                                    const actualIndex = items.findIndex((orig: Variable) => orig === item)
                                     return (
                                         <div key={actualIndex} className="obsidian-request-kv-row">
                                             <input type="checkbox" checked={item.enabled} onChange={(e) => updateVariableList(listKey, actualIndex, 'enabled', e.target.checked)} />
@@ -864,7 +1084,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                 />
 
                 <div className="obsidian-request-url-bar">
-                    <select value={request.method} onChange={(e) => onChange({ ...request, method: e.target.value })}>
+                    <select value={request.method} onChange={(e) => onChange({ ...request, method: e.target.value as RequestItem['method'] })}>
                         <option value="GET">GET</option>
                         <option value="POST">POST</option>
                         <option value="PUT">PUT</option>
@@ -897,13 +1117,13 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
             >
                 {['Params', 'Auth', 'Headers', 'Body', 'Variables', 'Pre-req', 'Extract', 'Settings'].map(tab => {
                     let hasData = false
-                    if (tab === 'Params') hasData = request.queryParams?.some((p: any) => p.key || p.value)
-                    if (tab === 'Headers') hasData = request.headers?.some((p: any) => p.key || p.value) || Object.values(request.autoHeaders || {}).some((h: any) => !h.enabled)
+                    if (tab === 'Params') hasData = (request.queryParams ?? []).some((p: Variable) => p.key || p.value)
+                    if (tab === 'Headers') hasData = (request.headers ?? []).some((p: Variable) => p.key || p.value)
                     if (tab === 'Auth') hasData = request.auth?.type !== 'none'
                     if (tab === 'Body') hasData = request.bodyType !== 'none'
-                    if (tab === 'Variables') hasData = request.localVariables && request.localVariables.length > 0
-                    if (tab === 'Pre-req') hasData = request.dependencies && request.dependencies.length > 0
-                    if (tab === 'Extract') hasData = request.extractionRules && request.extractionRules.length > 0
+                    if (tab === 'Variables') hasData = (request.localVariables ?? []).length > 0
+                    if (tab === 'Pre-req') hasData = (request.dependencies ?? []).length > 0
+                    if (tab === 'Extract') hasData = (request.extractionRules ?? []).length > 0
 
                     return (
                         <div key={tab} className={`obsidian-request-tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)} style={{ position: 'relative' }}>
@@ -917,15 +1137,19 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
             <div className="obsidian-request-tab-content">
                 {activeTab === 'Params' && renderVariableList('queryParams')}
                 {activeTab === 'Headers' && renderVariableList('headers')}
-                {activeTab === 'Variables' && renderVariableList('localVariables' as any)}
+                {activeTab === 'Variables' && (
+                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.9em', padding: '20px' }}>
+                        Local variables are set via pre-request dependencies or the Extract tab.
+                    </div>
+                )}
                 {activeTab === 'Auth' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <label style={{ fontWeight: 'bold' }}>Auth Type:</label>
                             <select
                                 className="obsidian-request-kv-input"
-                                value={request.auth?.type || 'none'}
-                                onChange={(e) => onChange({ ...request, auth: { ...request.auth, type: e.target.value } })}
+                                value={request.auth?.type ?? 'none'}
+                                onChange={(e) => onChange({ ...request, auth: { ...request.auth, type: e.target.value as AuthConfig['type'] } })}
                             >
                                 <option value="none">No Auth</option>
                                 <option value="basic">Basic Auth</option>
@@ -935,20 +1159,20 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                         </div>
                         {request.auth?.type === 'basic' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '400px' }}>
-                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Username (e.g. {{username}})" value={request.auth?.basicUsername || ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, basicUsername: val } })} collectionData={collectionData} />
-                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Password (e.g. {{password}})" value={request.auth?.basicPassword || ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, basicPassword: val } })} collectionData={collectionData} />
+                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Username (e.g. {{username}})" value={request.auth?.basicUsername ?? ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, basicUsername: val } })} collectionData={collectionData} />
+                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Password (e.g. {{password}})" value={request.auth?.basicPassword ?? ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, basicPassword: val } })} collectionData={collectionData} />
                             </div>
                         )}
                         {request.auth?.type === 'bearer' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '400px' }}>
-                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Token (e.g. {{bearerToken}})" value={request.auth?.bearerToken || ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, bearerToken: val } })} collectionData={collectionData} />
+                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Token (e.g. {{bearerToken}})" value={request.auth?.bearerToken ?? ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, bearerToken: val } })} collectionData={collectionData} />
                             </div>
                         )}
                         {request.auth?.type === 'apikey' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '400px' }}>
-                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Key" value={request.auth?.apiKeyKey || ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, apiKeyKey: val } })} collectionData={collectionData} />
-                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Value (e.g. {{apiKey}})" value={request.auth?.apiKeyValue || ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, apiKeyValue: val } })} collectionData={collectionData} />
-                                <select className="obsidian-request-kv-input" value={request.auth?.apiKeyAddTo || 'header'} onChange={(e) => onChange({ ...request, auth: { ...request.auth, apiKeyAddTo: e.target.value } })}>
+                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Key" value={request.auth?.apiKeyKey ?? ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, apiKeyKey: val } })} collectionData={collectionData} />
+                                <HighlightedInput className="obsidian-request-kv-input" placeholder="Value (e.g. {{apiKey}})" value={request.auth?.apiKeyValue ?? ''} onChange={(val: string) => onChange({ ...request, auth: { ...request.auth, apiKeyValue: val } })} collectionData={collectionData} />
+                                <select className="obsidian-request-kv-input" value={request.auth?.apiKeyAddTo ?? 'header'} onChange={(e) => onChange({ ...request, auth: { ...request.auth, apiKeyAddTo: e.target.value as AuthConfig['apiKeyAddTo'] } })}>
                                     <option value="header">Add to Header</option>
                                     <option value="query">Add to Query Params</option>
                                 </select>
@@ -985,19 +1209,19 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                     try {
                                         const parsed = JSON.parse(request.bodyRaw)
                                         onChange({ ...request, bodyRaw: JSON.stringify(parsed, null, 2) })
-                                    } catch (e) {
+                                    } catch {
                                         if (request.bodyRaw.trim().startsWith('<')) {
                                             let formatted = ''
                                             let pad = 0
                                             request.bodyRaw.split(/(?=(?:<[^>]+>))/).forEach((node: string) => {
-                                                if (node.match(/^<\w[^>]*[^\/]>.*$/)) {
-                                                    formatted += '  '.repeat(pad) + node + '\n'
+                                                if (node.match(/^<\w[^>]*[^/]>.*$/)) {
+                                                    formatted += `${'  '.repeat(pad)}${node}\n`
                                                     pad += 1
                                                 } else if (node.match(/^<\/\w/)) {
                                                     if (pad !== 0) pad -= 1
-                                                    formatted += '  '.repeat(pad) + node + '\n'
+                                                    formatted += `${'  '.repeat(pad)}${node}\n`
                                                 } else {
-                                                    formatted += '  '.repeat(pad) + node + '\n'
+                                                    formatted += `${'  '.repeat(pad)}${node}\n`
                                                 }
                                             })
                                             onChange({ ...request, bodyRaw: formatted.trim() })
@@ -1018,30 +1242,30 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                         )}
                         {request.bodyType === 'form-data' && (
                             <div>
-                                {request.bodyFormData.map((fd: any, i: number) => (
+                                {request.bodyFormData.map((fd: { key: string; value: string; type: 'text' | 'file'; enabled: boolean }, i: number) => (
                                     <div key={i} className="obsidian-request-kv-row">
                                         <input type="checkbox" checked={fd.enabled} onChange={(e) => {
-                                            const newFd = [...request.bodyFormData]; newFd[i].enabled = e.target.checked; onChange({ ...request, bodyFormData: newFd })
+                                            const newFd = [...request.bodyFormData]; newFd[i]!.enabled = e.target.checked; onChange({ ...request, bodyFormData: newFd })
                                         }} />
                                         <select className="obsidian-request-kv-input" value={fd.type} onChange={(e) => {
-                                            const newFd = [...request.bodyFormData]; newFd[i].type = e.target.value; onChange({ ...request, bodyFormData: newFd })
+                                            const newFd = [...request.bodyFormData]; newFd[i]!.type = e.target.value as 'text' | 'file'; onChange({ ...request, bodyFormData: newFd })
                                         }}>
                                             <option value="text">Text</option>
                                             <option value="file">File</option>
                                         </select>
                                         <input className="obsidian-request-kv-input" style={{ flex: 1 }} placeholder="Key" value={fd.key} onChange={(e) => {
-                                            const newFd = [...request.bodyFormData]; newFd[i].key = e.target.value; onChange({ ...request, bodyFormData: newFd })
+                                            const newFd = [...request.bodyFormData]; newFd[i]!.key = e.target.value; onChange({ ...request, bodyFormData: newFd })
                                         }} />
                                         {fd.type === 'file' ? (
                                             <input className="obsidian-request-kv-input" style={{ flex: 2, padding: '4px' }} type="file" onChange={(e) => {
                                                 const file = e.target.files?.[0]
                                                 if (file) {
-                                                    const newFd = [...request.bodyFormData]; newFd[i].value = (file as any).path; onChange({ ...request, bodyFormData: newFd })
+                                                    const newFd = [...request.bodyFormData]; newFd[i]!.value = (file as File & { path: string }).path; onChange({ ...request, bodyFormData: newFd })
                                                 }
                                             }} />
                                         ) : (
                                             <input className="obsidian-request-kv-input" style={{ flex: 2 }} placeholder="Value" value={fd.value} onChange={(e) => {
-                                                const newFd = [...request.bodyFormData]; newFd[i].value = e.target.value; onChange({ ...request, bodyFormData: newFd })
+                                                const newFd = [...request.bodyFormData]; newFd[i]!.value = e.target.value; onChange({ ...request, bodyFormData: newFd })
                                             }} />
                                         )}
                                         <button className="btn-ghost" onClick={() => {
@@ -1060,7 +1284,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                 <input type="file" onChange={(e) => {
                                     const file = e.target.files?.[0]
                                     if (file) {
-                                        onChange({ ...request, bodyBinaryPath: (file as any).path })
+                                        onChange({ ...request, bodyBinaryPath: (file as File & { path: string }).path })
                                     }
                                 }} />
                                 <span style={{ color: 'var(--text-muted)' }}>{request.bodyBinaryPath || 'No file selected'}</span>
@@ -1074,10 +1298,10 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                         {request.extractionRules.map((rule: ExtractionRule, i: number) => (
                             <div key={i} className="obsidian-request-kv-row">
                                 <input className="obsidian-request-kv-input" style={{ flex: 1 }} placeholder="Variable Name (e.g., token)" value={rule.name} onChange={(e) => {
-                                    const newRules = [...request.extractionRules]; newRules[i].name = e.target.value; onChange({ ...request, extractionRules: newRules })
+                                    const newRules = [...request.extractionRules]; newRules[i]!.name = e.target.value; onChange({ ...request, extractionRules: newRules })
                                 }} />
                                 <input className="obsidian-request-kv-input" style={{ flex: 2 }} placeholder="JSONPath (e.g., $.data.token)" value={rule.jsonPath} onChange={(e) => {
-                                    const newRules = [...request.extractionRules]; newRules[i].jsonPath = e.target.value; onChange({ ...request, extractionRules: newRules })
+                                    const newRules = [...request.extractionRules]; newRules[i]!.jsonPath = e.target.value; onChange({ ...request, extractionRules: newRules })
                                 }} />
                                 <button className="btn-ghost" onClick={() => {
                                     const newRules = [...request.extractionRules]; newRules.splice(i, 1); onChange({ ...request, extractionRules: newRules })
@@ -1108,22 +1332,22 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                         color: responseSubTab === subTab ? 'var(--text-normal)' : 'var(--text-muted)',
                                         borderBottom: responseSubTab === subTab ? '2px solid var(--interactive-accent)' : 'none'
                                     }}
-                                    onClick={() => setResponseSubTab(subTab as any)}
+                                    onClick={() => setResponseSubTab(subTab as 'Body' | 'Headers' | 'Cookies' | 'Pre-req Logs')}
                                 >
                                     {subTab}
                                 </span>
                             ))}
                         </div>
-                        {response && response.response && responseSubTab === 'Body' && (
+                        {response?.response && responseSubTab === 'Body' && (
                             <div style={{ display: 'flex', gap: '5px' }}>
                                 <button className={`btn-ghost ${responseMode === 'raw' ? 'active' : ''}`} style={{ fontSize: '10px', background: responseMode === 'raw' ? 'var(--background-modifier-active-hover)' : 'transparent' }} onClick={() => setResponseMode('raw')}>Raw</button>
                                 <button className={`btn-ghost ${responseMode === 'preview' ? 'active' : ''}`} style={{ fontSize: '10px', background: responseMode === 'preview' ? 'var(--background-modifier-active-hover)' : 'transparent' }} onClick={() => setResponseMode('preview')}>Preview</button>
                             </div>
                         )}
                     </div>
-                    {response && response.response && (
+                    {response?.response && (
                         <div className="obsidian-request-response-status">
-                            <span>Status: <span className={`obsidian-request-badge ${response.response.status >= 200 && response.response.status < 300 ? 'success' : 'error'}`}>{response.response.status}</span></span>
+                            <span>Status: <span className={`obsidian-request-badge ${(response.response.status ?? 0) >= 200 && (response.response.status ?? 0) < 300 ? 'success' : 'error'}`}>{response.response.status ?? 'N/A'}</span></span>
                             <span style={{ color: 'var(--text-muted)' }}>Time: {response.timeMs} ms</span>
                         </div>
                     )}
@@ -1131,7 +1355,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                 <div className="obsidian-request-response-body" style={{ padding: responseMode === 'preview' && responseSubTab === 'Body' ? '0' : '15px 20px' }}>
                     {loading && <div style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', padding: '15px 20px' }}><span className="loading-spinner"></span> {loadingStatus || 'Waiting for response...'}</div>}
                     {!loading && !response && <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', textAlign: 'center', marginTop: '20px' }}>Enter the URL and click Send to get a response</div>}
-                    {!loading && response && response.error && <div style={{ color: 'var(--color-red)', padding: '15px 20px' }}>Error: {response.error}</div>}
+                    {!loading && response?.error && <div style={{ color: 'var(--color-red)', padding: '15px 20px' }}>Error: {response.error}</div>}
                     {!loading && response && (
                         <>
                             {response.response && responseSubTab === 'Body' && responseMode === 'raw' && (
@@ -1152,7 +1376,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                 <div style={{ width: '100%', height: '100%', background: 'white' }}>
                                     {response.response.contentType?.includes('image') ? (
                                         <img
-                                            src={URL.createObjectURL(new Blob([response.response.arrayBuffer], { type: response.response.contentType }))}
+                                            src={URL.createObjectURL(new Blob([response.response.arrayBuffer ?? new ArrayBuffer(0)], { type: response.response.contentType }))}
                                             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                                         />
                                     ) : (
@@ -1167,10 +1391,10 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
 
                             {response.response && responseSubTab === 'Headers' && (
                                 <div>
-                                    {Object.entries(response.response.headers || {}).map(([key, val]: [string, any], i) => (
+                                    {Object.entries(response.response.headers ?? {}).map(([key, val]: [string, string | string[] | undefined], i) => (
                                         <div key={i} className="obsidian-request-kv-row">
                                             <input className="obsidian-request-kv-input" style={{ flex: 1, fontWeight: 'bold' }} readOnly value={key} />
-                                            <input className="obsidian-request-kv-input" style={{ flex: 2 }} readOnly value={val} />
+                                            <input className="obsidian-request-kv-input" style={{ flex: 2 }} readOnly value={Array.isArray(val) ? val.join(', ') : (val ?? '')} />
                                         </div>
                                     ))}
                                 </div>
@@ -1188,11 +1412,11 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                         return cookies.map((cookieStr: string, i: number) => {
                                             const parts = cookieStr.split(';')
                                             const [nameVal] = parts
-                                            const [name, val] = nameVal.split('=')
+                                            const [name, val] = (nameVal ?? '').split('=')
                                             return (
                                                 <div key={i} className="obsidian-request-kv-row" style={{ marginBottom: '10px' }}>
                                                     <input className="obsidian-request-kv-input" style={{ flex: 1, fontWeight: 'bold' }} readOnly value={name} />
-                                                    <input className="obsidian-request-kv-input" style={{ flex: 2 }} readOnly value={val || ''} />
+                                                    <input className="obsidian-request-kv-input" style={{ flex: 2 }} readOnly value={val ?? ''} />
                                                 </div>
                                             )
                                         })
@@ -1204,11 +1428,11 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                 <div>
                                     {response.logs && response.logs.length > 0 ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                            {response.logs.map((log: any, i: number) => (
+                                            {response.logs.map((log: PreRequestLog, i: number) => (
                                                 <details key={i} style={{ border: '1px solid var(--background-modifier-border)', borderRadius: '4px', overflow: 'hidden' }}>
                                                     <summary style={{ background: 'var(--background-secondary)', padding: '4px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', outline: 'none' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                            <span className={`obsidian-request-badge ${log.status >= 200 && log.status < 300 ? 'success' : 'error'}`} style={{ fontSize: '9px', padding: '1px 4px' }}>{log.status || 'ERR'}</span>
+                                                            <span className={`obsidian-request-badge ${log.status >= 200 && log.status < 300 ? 'success' : 'error'}`} style={{ fontSize: '9px', padding: '1px 4px' }}>{log.status ?? 'ERR'}</span>
                                                             <span style={{ fontWeight: '600', fontSize: '12px' }}>{log.requestName}</span>
                                                         </div>
                                                         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '11px' }}>
@@ -1225,7 +1449,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: any) =>
                                                                     <div>
                                                                         <span style={{ color: 'var(--text-muted)', textTransform: 'uppercase', fontSize: '10px' }}>Extracted</span>
                                                                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
-                                                                            {log.extractedVariables.map((v: any, j: number) => (
+                                                                            {log.extractedVariables.map((v: { key: string; value: string }, j: number) => (
                                                                                 <span key={j} style={{ background: 'var(--background-primary-alt)', padding: '2px 4px', borderRadius: '3px', border: '1px solid var(--background-modifier-border-hover)' }}>
                                                                                     <span style={{ color: 'var(--color-orange)', marginRight: '4px' }}>{v.key}:</span>
                                                                                     <span style={{ color: 'var(--text-normal)' }}>{v.value}</span>

@@ -14,7 +14,8 @@ export default [
             parserOptions: {
                 ecmaVersion: 'latest',
                 sourceType: 'module',
-                ecmaFeatures: { jsx: true }
+                ecmaFeatures: { jsx: true },
+                project: './tsconfig.json'
             },
             globals: {
                 window: 'readonly',
@@ -62,23 +63,46 @@ export default [
             'react-hooks': reactHooks
         },
         rules: {
+            // React
             'react/react-in-jsx-scope': 'off',
             'react/prop-types': 'off',
-            '@typescript-eslint/no-explicit-any': 'warn',
+
+            // TypeScript strict
+            '@typescript-eslint/no-explicit-any': 'error',
             '@typescript-eslint/explicit-module-boundary-types': 'off',
-            '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+            '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+            '@typescript-eslint/no-inferrable-types': 'error',
+            '@typescript-eslint/prefer-as-const': 'error',
+            '@typescript-eslint/no-require-imports': 'error',
+            '@typescript-eslint/prefer-for-of': 'error',
+            '@typescript-eslint/prefer-optional-chain': 'error',
+            '@typescript-eslint/prefer-nullish-coalescing': 'error',
+
+            // General strict
             'no-console': 'warn',
-            'prefer-const': 'warn',
+            'prefer-const': 'error',
             'no-var': 'error',
-            'eqeqeq': ['warn', 'always'],
+            'eqeqeq': ['error', 'always'],
             'semi': ['error', 'never'],
             'quotes': ['error', 'single', { avoidEscape: true }],
             'indent': ['error', 4],
             'comma-dangle': ['error', 'never'],
             'no-trailing-spaces': 'error',
             'eol-last': 'error',
-            'no-empty': 'warn',
-            'no-useless-escape': 'warn'
+            'no-empty': 'error',
+            'no-useless-escape': 'error',
+            'no-useless-rename': 'error',
+            'object-shorthand': 'error',
+            'prefer-template': 'error',
+            'no-duplicate-imports': 'error',
+            'no-unreachable': 'error',
+            'no-constant-binary-expression': 'error',
+            'no-promise-executor-return': 'error',
+            'no-self-compare': 'error',
+            'no-template-curly-in-string': 'error',
+            'no-unmodified-loop-condition': 'error',
+            'no-unreachable-loop': 'error',
+            'require-atomic-updates': 'error'
         }
     }
 ]

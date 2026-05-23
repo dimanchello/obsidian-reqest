@@ -33,27 +33,28 @@ interface ExternalCollection {
     item: ExternalItem[]
 }
 
-function extractRequests(items: ExternalItem[]): RequestItem[] {
+function extractRequests(items: ExternalItem[], parentFolderId?: string): RequestItem[] {
     let requests: RequestItem[] = []
 
     for (const item of items) {
         if (item.item) {
+            const folderId = Date.now().toString() + Math.random().toString(36).substring(7)
             requests.push(normalizeRequest({
-                id: Date.now().toString() + Math.random().toString(36).substring(7),
+                id: folderId,
                 name: item.name || 'Folder',
-                itemType: 'divider'
+                itemType: 'folder'
             }))
-            requests = requests.concat(extractRequests(item.item))
+            requests = requests.concat(extractRequests(item.item, folderId))
         } else if (item.request) {
             const req = item.request
 
-            const queryParams: Variable[] = (req.url.query || []).map(q => ({
+            const queryParams: Variable[] = (req.url.query ?? []).map(q => ({
                 key: q.key,
                 value: q.value,
                 enabled: !q.disabled
             }))
 
-            const headers: Variable[] = (req.header || []).map(h => ({
+            const headers: Variable[] = (req.header ?? []).map(h => ({
                 key: h.key,
                 value: h.value,
                 enabled: !h.disabled
@@ -66,10 +67,10 @@ function extractRequests(items: ExternalItem[]): RequestItem[] {
             if (req.body) {
                 if (req.body.mode === 'raw') {
                     bodyType = 'json'
-                    bodyRaw = req.body.raw || ''
+                    bodyRaw = req.body.raw ?? ''
                 } else if (req.body.mode === 'formdata') {
                     bodyType = 'form-data'
-                    bodyFormData = (req.body.formdata || []).map(f => ({
+                    bodyFormData = (req.body.formdata ?? []).map(f => ({
                         key: f.key,
                         value: f.value,
                         type: f.type === 'file' ? 'file' : 'text',
@@ -111,7 +112,8 @@ function extractRequests(items: ExternalItem[]): RequestItem[] {
                 bodyType,
                 bodyRaw,
                 bodyFormData,
-                auth: authConfig as RequestItem['auth']
+                auth: authConfig as unknown as RequestItem['auth'],
+                folderId: parentFolderId
             }))
         }
     }
@@ -122,7 +124,7 @@ function extractRequests(items: ExternalItem[]): RequestItem[] {
 export function importExternalCollection(jsonString: string): RequestItem[] {
     try {
         const data = JSON.parse(jsonString) as ExternalCollection
-        if (data && data.item) {
+        if (data?.item) {
             return extractRequests(data.item).map(normalizeRequest)
         }
         return []
@@ -132,88 +134,93 @@ export function importExternalCollection(jsonString: string): RequestItem[] {
     }
 }
 
+function createExternalItem(req: RequestItem): ExternalItem {
+    let body: { mode: string; raw?: string; formdata?: { key: string; value: string; type: string; disabled?: boolean }[] } | undefined
+    if (req.bodyType === 'json' || req.bodyType === 'raw') {
+        body = { mode: 'raw', raw: req.bodyRaw }
+    } else if (req.bodyType === 'form-data') {
+        body = {
+            mode: 'formdata',
+            formdata: req.bodyFormData.map(f => ({
+                key: f.key,
+                value: f.value,
+                type: f.type,
+                disabled: !f.enabled
+            }))
+        }
+    }
+
+    let auth: { type: string; basic?: { key: string; value: string; type: string }[]; bearer?: { key: string; value: string; type: string }[]; apikey?: { key: string; value: string; type: string }[] } | undefined
+    if (req.auth.type === 'basic') {
+        auth = {
+            type: 'basic',
+            basic: [
+                { key: 'username', value: req.auth.basicUsername ?? '', type: 'string' },
+                { key: 'password', value: req.auth.basicPassword ?? '', type: 'string' }
+            ]
+        }
+    } else if (req.auth.type === 'bearer') {
+        auth = {
+            type: 'bearer',
+            bearer: [
+                { key: 'token', value: req.auth.bearerToken ?? '', type: 'string' }
+            ]
+        }
+    } else if (req.auth.type === 'apikey') {
+        auth = {
+            type: 'apikey',
+            apikey: [
+                { key: 'key', value: req.auth.apiKeyKey ?? '', type: 'string' },
+                { key: 'value', value: req.auth.apiKeyValue ?? '', type: 'string' },
+                { key: 'in', value: req.auth.apiKeyAddTo ?? 'header', type: 'string' }
+            ]
+        }
+    }
+
+    return {
+        name: req.name,
+        request: {
+            method: req.method,
+            url: {
+                raw: req.url,
+                query: req.queryParams.map(q => ({
+                    key: q.key,
+                    value: q.value,
+                    disabled: !q.enabled
+                }))
+            },
+            header: req.headers.map(h => ({
+                key: h.key,
+                value: h.value,
+                disabled: !h.enabled
+            })),
+            body,
+            auth
+        }
+    }
+}
+
 export function exportExternalCollection(collectionData: CollectionData, collectionName: string): string {
     const items: ExternalItem[] = []
-    let currentFolder: ExternalItem | null = null
+    const folderChildren = new Map<string, RequestItem[]>()
 
     for (const req of collectionData.requests) {
-        if (req.itemType === 'divider') {
-            currentFolder = {
+        if (req.folderId) {
+            const children = folderChildren.get(req.folderId) ?? []
+            children.push(req)
+            folderChildren.set(req.folderId, children)
+        }
+    }
+
+    for (const req of collectionData.requests) {
+        if (req.itemType === 'folder') {
+            const children = folderChildren.get(req.id) ?? []
+            items.push({
                 name: req.name,
-                item: []
-            }
-            items.push(currentFolder)
-            continue
-        }
-
-        let body: Record<string, unknown> | undefined
-        if (req.bodyType === 'json' || req.bodyType === 'raw') {
-            body = { mode: 'raw', raw: req.bodyRaw }
-        } else if (req.bodyType === 'form-data') {
-            body = {
-                mode: 'formdata',
-                formdata: req.bodyFormData.map(f => ({
-                    key: f.key,
-                    value: f.value,
-                    type: f.type,
-                    disabled: !f.enabled
-                }))
-            }
-        }
-
-        let auth: Record<string, unknown> | undefined
-        if (req.auth.type === 'basic') {
-            auth = {
-                type: 'basic',
-                basic: [
-                    { key: 'username', value: req.auth.basicUsername || '', type: 'string' },
-                    { key: 'password', value: req.auth.basicPassword || '', type: 'string' }
-                ]
-            }
-        } else if (req.auth.type === 'bearer') {
-            auth = {
-                type: 'bearer',
-                bearer: [
-                    { key: 'token', value: req.auth.bearerToken || '', type: 'string' }
-                ]
-            }
-        } else if (req.auth.type === 'apikey') {
-            auth = {
-                type: 'apikey',
-                apikey: [
-                    { key: 'key', value: req.auth.apiKeyKey || '', type: 'string' },
-                    { key: 'value', value: req.auth.apiKeyValue || '', type: 'string' },
-                    { key: 'in', value: req.auth.apiKeyAddTo || 'header', type: 'string' }
-                ]
-            }
-        }
-
-        const externalReq: ExternalItem = {
-            name: req.name,
-            request: {
-                method: req.method,
-                url: {
-                    raw: req.url,
-                    query: req.queryParams.map(q => ({
-                        key: q.key,
-                        value: q.value,
-                        disabled: !q.enabled
-                    }))
-                },
-                header: req.headers.map(h => ({
-                    key: h.key,
-                    value: h.value,
-                    disabled: !h.enabled
-                })),
-                body,
-                auth
-            }
-        }
-
-        if (currentFolder && currentFolder.item) {
-            currentFolder.item.push(externalReq)
-        } else {
-            items.push(externalReq)
+                item: children.map(createExternalItem)
+            })
+        } else if (!req.folderId) {
+            items.push(createExternalItem(req))
         }
     }
 

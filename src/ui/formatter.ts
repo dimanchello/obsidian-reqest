@@ -7,7 +7,7 @@ export function formatAndHighlightResponseBody(text: string | null | undefined, 
             const jsonObj = JSON.parse(text)
             const jsonStr = JSON.stringify(jsonObj, null, 2)
             // Basic syntax highlighting
-            const highlighted = jsonStr.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+            const highlighted = jsonStr.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, function (match) {
                 let cls = 'json-number'
                 if (/^"/.test(match)) {
                     if (/:$/.test(match)) {
@@ -23,7 +23,7 @@ export function formatAndHighlightResponseBody(text: string | null | undefined, 
                 return `<span class="${cls}">${match}</span>`
             })
             return { isHtml: true, content: highlighted }
-        } catch(e) {}
+        } catch { /* empty */ }
     }
 
     // Check if XML/HTML
@@ -31,14 +31,14 @@ export function formatAndHighlightResponseBody(text: string | null | undefined, 
         let formatted = ''
         let pad = 0
         text.split(/(?=(?:<[^>]+>))/).forEach((node: string) => {
-            if (node.match(/^<\w[^>]*[^\/]>.*$/)) {
-                formatted += '  '.repeat(pad) + node + '\n'
+            if (node.match(/^<\w[^>]*[^/]>.*$/)) {
+                formatted += `${'  '.repeat(pad) + node}\n`
                 pad += 1
             } else if (node.match(/^<\/\w/)) {
                 if (pad !== 0) pad -= 1
-                formatted += '  '.repeat(pad) + node + '\n'
+                formatted += `${'  '.repeat(pad) + node}\n`
             } else {
-                formatted += '  '.repeat(pad) + node + '\n'
+                formatted += `${'  '.repeat(pad) + node}\n`
             }
         })
 

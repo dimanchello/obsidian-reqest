@@ -15,7 +15,7 @@
 - When a note is deleted, its collection file is automatically deleted
 
 ### Core Modules
-- `src/main.ts` - Plugin entry point, view registration, code block processor, file rename/delete listeners
+- `src/main.ts` - Plugin entry point, code block processor, file rename/delete listeners
 - `src/storage.ts` - Collection data loading/saving/renaming/deletion
 - `src/network.ts` - HTTP request execution (Obsidian requestUrl + Node.js fallback)
 - `src/preRequests.ts` - Dependency chain execution with variable extraction
@@ -32,22 +32,40 @@
 - Variable substitution: `{{variableName}}` syntax, environment + local scope
 - HTTP: Obsidian `requestUrl()` with Node.js fallback for file uploads/SSL
 - UI: React 18 with JSX, rendered inside Obsidian's DOM
+- Folders replace dividers — requests grouped via `folderId`, folders have `itemType: 'folder'`
 
 ## Development Commands
 
 ```bash
-npm run dev      # Watch mode build
-npm run build    # Production build (output to dist/)
-npm run lint     # Run ESLint
-npm run lint:fix # Fix ESLint issues
-npm run format   # Format with Prettier
-npm test         # Run tests
-npm test:watch   # Watch mode tests
+npm run dev        # Watch mode build
+npm run build      # Production build (output to dist/)
+npm run lint       # Run ESLint (strict: 0 errors required)
+npm run lint:fix   # Fix ESLint issues
+npm run typecheck  # TypeScript type check (0 errors required)
+npm run format     # Format with Prettier
+npm test           # Run tests
+npm test:watch     # Watch mode tests
 ```
+
+## PR Checklist
+
+Before submitting a PR, ensure the following pass with 0 errors:
+
+1. `npm run lint` — ESLint (strict config, 0 errors)
+2. `npm run typecheck` — TypeScript `--noEmit` (strict, 0 errors)
+3. `npm test` — All existing tests pass
+
+## Testing Guidelines
+
+- **Vitest** for unit tests
+- Test files: `*.test.ts` or `*.test.tsx` alongside source or in `__tests__/`
+- **Scope tests to business logic only:** storage I/O, variable substitution, import/export, formatter
+- Do NOT write tests for React UI components (App.tsx, PreRequestsTab.tsx) — UI is tested manually in Obsidian
+- Mock Obsidian APIs when testing plugin-specific code
 
 ## Code Conventions
 
-- TypeScript with strict null checks
+- TypeScript with strict mode (strict: true, noUnusedLocals, noUnusedParameters)
 - React 18 functional components with hooks
 - No class components except Obsidian plugin/view classes
 - 4-space indentation
@@ -56,13 +74,8 @@ npm test:watch   # Watch mode tests
 - Components: PascalCase, functions/variables: camelCase
 - Interfaces: PascalCase with descriptive names
 - File names: camelCase for modules, PascalCase for React components
-
-## Testing
-
-- Vitest for unit tests
-- Test files: `*.test.ts` or `*.test.tsx` alongside source or in `__tests__/`
-- Mock Obsidian APIs when testing plugin-specific code
-- Focus tests on: storage, network variable substitution, import/export
+- No `any` types — use proper types or `unknown`
+- Prefer `??` over `||` for nullish coalescing, use optional chaining `?.`
 
 ## Plugin Naming
 

@@ -3,26 +3,36 @@ import { CollectionData, RequestItem, Environment } from './types'
 import * as fs from 'fs'
 import * as http from 'http'
 import * as https from 'https'
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const FormData = require('form-data')
+import FormData from 'form-data'
+
+interface NodeResponse {
+    status: number | undefined
+    headers: Record<string, string | string[] | undefined>
+    contentType: string
+    text: string
+    json: unknown
+    arrayBuffer: ArrayBuffer
+    isBinary: boolean
+}
+
+type RequestResult = {
+    response?: RequestUrlResponse | NodeResponse
+    error?: string
+    timeMs: number
+}
 
 export function substituteVariables(text: string, activeEnvironment?: Environment, localScopeCache?: Record<string, string>): string {
     if (!text) return text
     let result = text
 
-    // Process all {{vars}}
     const regex = /{{([^}]+)}}/g
     result = result.replace(regex, (match, varName) => {
-        // 1. Local scope first
-        if (localScopeCache && localScopeCache[varName] !== undefined) {
-            return localScopeCache[varName]
-        }
-        // 2. Global scope second
+        const localVal = localScopeCache?.[varName]
+        if (localVal !== undefined) return localVal
         if (activeEnvironment) {
             const envVar = activeEnvironment.variables.find(v => v.key === varName && v.enabled)
             if (envVar) return envVar.value
         }
-        // 3. Keep original if not found
         return match
     })
 
@@ -33,7 +43,7 @@ export async function executeRequest(
     request: RequestItem,
     collectionData: CollectionData,
     localScopeCache?: Record<string, string>
-): Promise<{ response?: RequestUrlResponse | any, error?: string, timeMs: number }> {
+): Promise<RequestResult> {
     const activeEnv = collectionData.environments.find(e => e.id === collectionData.activeEnvironmentId)
 
     let url = substituteVariables(request.url, activeEnv, localScopeCache)
@@ -55,13 +65,13 @@ export async function executeRequest(
     // Apply Auth
     if (request.auth.type === 'basic' && request.auth.basicUsername) {
         const user = substituteVariables(request.auth.basicUsername, activeEnv, localScopeCache)
-        const pass = substituteVariables(request.auth.basicPassword || '', activeEnv, localScopeCache)
-        headers['Authorization'] = 'Basic ' + Buffer.from(user + ':' + pass).toString('base64')
+        const pass = substituteVariables(request.auth.basicPassword ?? '', activeEnv, localScopeCache)
+        headers['Authorization'] = `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`
     } else if (request.auth.type === 'bearer' && request.auth.bearerToken) {
-        headers['Authorization'] = 'Bearer ' + substituteVariables(request.auth.bearerToken, activeEnv, localScopeCache)
+        headers['Authorization'] = `Bearer ${substituteVariables(request.auth.bearerToken, activeEnv, localScopeCache)}`
     } else if (request.auth.type === 'apikey' && request.auth.apiKeyKey) {
         const key = substituteVariables(request.auth.apiKeyKey, activeEnv, localScopeCache)
-        const val = substituteVariables(request.auth.apiKeyValue || '', activeEnv, localScopeCache)
+        const val = substituteVariables(request.auth.apiKeyValue ?? '', activeEnv, localScopeCache)
         if (request.auth.apiKeyAddTo === 'header') {
             headers[key] = val
         } else {
@@ -73,7 +83,6 @@ export async function executeRequest(
 
     let body: string | ArrayBuffer | undefined = undefined
 
-    // Node HTTPS/HTTP fallback conditions (e.g. reading binary files or form-data with files, or custom SSL config)
     const hasFiles = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'form-data' && request.bodyFormData.some(f => f.enabled && f.type === 'file' && f.value)
     const hasBinaryBody = request.method !== 'GET' && request.method !== 'HEAD' && request.bodyType === 'binary' && request.bodyBinaryPath
     const requiresNode = hasFiles || hasBinaryBody || request.settings.verifySsl === false
@@ -127,10 +136,10 @@ export async function executeRequest(
         const obsidianResponse = await requestUrl(reqParams)
         const timeMs = Date.now() - startTime
 
-        const contentType = obsidianResponse.headers['content-type']?.toString() || ''
+        const contentType = obsidianResponse.headers['content-type']?.toString() ?? ''
         const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml')
 
-        let jsonPayload = null
+        let jsonPayload: unknown = null
         if (contentType.includes('json')) {
             jsonPayload = obsidianResponse.json
         }
@@ -147,17 +156,17 @@ export async function executeRequest(
             },
             timeMs
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         const timeMs = Date.now() - startTime
-        return { error: err.message || 'Failed to fetch', timeMs }
+        return { error: err instanceof Error ? err.message : 'Failed to fetch', timeMs }
     }
 }
 
-async function executeNodeRequest(url: string, request: RequestItem, headers: Record<string, string>, activeEnv?: Environment, localScopeCache?: Record<string, string>) {
+async function executeNodeRequest(url: string, request: RequestItem, headers: Record<string, string>, activeEnv?: Environment, localScopeCache?: Record<string, string>): Promise<RequestResult> {
     const startTime = Date.now()
-    return new Promise<any>((resolve) => {
+    return new Promise<RequestResult>((resolve) => {
         try {
-            let reqBody: any = null
+            let reqBody: FormData | fs.ReadStream | null = null
             let reqHeaders = { ...headers }
 
             if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -184,9 +193,7 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
                         reqBody = fs.createReadStream(filePath)
                         const stats = fs.statSync(filePath)
                         reqHeaders['Content-Length'] = stats.size.toString()
-                        if (!reqHeaders['Content-Type']) {
-                            reqHeaders['Content-Type'] = 'application/octet-stream'
-                        }
+                        reqHeaders['Content-Type'] ??= 'application/octet-stream'
                     } else {
                         throw new Error(`Binary file not found: ${filePath}`)
                     }
@@ -210,22 +217,22 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
                 res.on('end', () => {
                     const timeMs = Date.now() - startTime
                     const buffer = Buffer.concat(chunks)
-                    const contentType = res.headers['content-type'] || ''
+                    const contentType = res.headers['content-type'] ?? ''
 
                     let text = ''
-                    let json = null
+                    let json: unknown = null
                     const isBinary = !contentType.includes('text') && !contentType.includes('json') && !contentType.includes('xml')
 
                     if (!isBinary) {
                         text = buffer.toString('utf8')
                         if (contentType.includes('json')) {
-                            try { json = JSON.parse(text) } catch(e) {}
+                            try { json = JSON.parse(text) } catch { json = null }
                         }
                     }
 
                     resolve({
                         response: {
-                            status: res.statusCode || 200,
+                            status: res.statusCode ?? 200,
                             headers: res.headers,
                             contentType,
                             text,
@@ -243,7 +250,7 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
             })
 
             if (reqBody) {
-                if (reqBody.pipe) {
+                if ('pipe' in reqBody) {
                     reqBody.pipe(req)
                 } else {
                     req.write(reqBody)
@@ -252,8 +259,8 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
             } else {
                 req.end()
             }
-        } catch(e: any) {
-            resolve({ error: e.message, timeMs: Date.now() - startTime })
+        } catch (e: unknown) {
+            resolve({ error: e instanceof Error ? e.message : 'Unknown error', timeMs: Date.now() - startTime })
         }
     })
 }

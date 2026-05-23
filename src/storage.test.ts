@@ -86,8 +86,8 @@ describe('normalizeRequest', () => {
 describe('DEFAULT_COLLECTION_DATA', () => {
     it('should have default environment', () => {
         expect(DEFAULT_COLLECTION_DATA.environments.length).toBe(1)
-        expect(DEFAULT_COLLECTION_DATA.environments[0].id).toBe('default-env')
-        expect(DEFAULT_COLLECTION_DATA.environments[0].name).toBe('Local')
+        expect(DEFAULT_COLLECTION_DATA.environments[0]!.id).toBe('default-env')
+        expect(DEFAULT_COLLECTION_DATA.environments[0]!.name).toBe('Local')
     })
 
     it('should have empty requests array', () => {

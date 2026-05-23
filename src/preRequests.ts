@@ -1,4 +1,4 @@
-import { CollectionData, RequestItem, ExtractionRule, PreRequestLog } from './types'
+import { CollectionData, ExtractionRule, PreRequestLog } from './types'
 import { executeRequest } from './network'
 import { JSONPath } from 'jsonpath-plus'
 
@@ -11,7 +11,7 @@ async function executeSingleRequest(
     contextReqId: string,
     logs: PreRequestLog[],
     localScopeCache: Record<string, string>
-): Promise<{ response?: any, error?: string, timeMs: number }> {
+) {
 
     const request = collectionData.requests.find(r => r.id === reqId)
     if (!request) {
@@ -26,13 +26,14 @@ async function executeSingleRequest(
 
         const extractedVars: { key: string; value: string }[] = []
 
-        if (res.response && res.response.json) {
+        const jsonBody = res.response?.json
+        if (jsonBody) {
             request.extractionRules.forEach((rule: ExtractionRule) => {
                 try {
-                    const result = JSONPath({ path: rule.jsonPath, json: res.response.json })
+                    const result = JSONPath({ path: rule.jsonPath, json: jsonBody as object })
                     if (result && result.length > 0) {
                         const val = typeof result[0] === 'object' ? JSON.stringify(result[0]) : String(result[0])
-                        const targetEnvId = rule.targetEnvironmentId || collectionData.activeEnvironmentId || ''
+                        const targetEnvId = rule.targetEnvironmentId ?? collectionData.activeEnvironmentId ?? ''
 
                         const contextReq = collectionData.requests.find(r => r.id === contextReqId)
                         const hasLocal = contextReq?.localVariables?.find(v => v.key === rule.name)
@@ -57,14 +58,14 @@ async function executeSingleRequest(
                             extractedVars.push({ key: rule.name, value: val })
                         }
                     }
-                } catch (e) {}
+                } catch { /* empty */ }
             })
         }
 
         logs.push({
             requestId: request.id,
             requestName: request.name,
-            status: res.response?.status || 0,
+            status: res.response?.status ?? 0,
             timeMs: res.timeMs,
             extractedVariables: extractedVars,
             error: res.error,
@@ -72,16 +73,17 @@ async function executeSingleRequest(
         })
 
         return res
-    } catch (e: any) {
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
         logs.push({
             requestId: request.id,
             requestName: request.name,
             status: 0,
             timeMs: 0,
             extractedVariables: [],
-            error: e.message
+            error: message
         })
-        return { error: e.message, timeMs: 0 }
+        return { error: message, timeMs: 0 }
     }
 }
 
@@ -90,7 +92,7 @@ export async function executeWithDependencies(
     collectionData: CollectionData,
     onExtract: (envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => void,
     onProgress: (status: string) => void
-): Promise<{ response?: any, error?: string, timeMs: number, logs: PreRequestLog[] }> {
+) {
 
     const request = collectionData.requests.find(r => r.id === mainReqId)
     if (!request) {
@@ -123,16 +125,17 @@ export async function executeWithDependencies(
 
         const extractedVars: { key: string; value: string }[] = []
 
-        if (res.response && res.response.json) {
+        const jsonBody = res.response?.json
+        if (jsonBody) {
             request.extractionRules.forEach((rule: ExtractionRule) => {
                 try {
-                    const result = JSONPath({ path: rule.jsonPath, json: res.response.json })
+                    const result = JSONPath({ path: rule.jsonPath, json: jsonBody as object })
                     if (result && result.length > 0) {
                         const val = typeof result[0] === 'object' ? JSON.stringify(result[0]) : String(result[0])
-                        const targetEnvId = rule.targetEnvironmentId || collectionData.activeEnvironmentId || ''
+                        const targetEnvId = rule.targetEnvironmentId ?? collectionData.activeEnvironmentId ?? ''
 
                         // Check if variable exists in local context, otherwise global. If neither, force local.
-                        const contextReq = collectionData.requests.find(r => r.id === contextReqId)
+                        const contextReq = collectionData.requests.find(r => r.id === mainReqId)
                         const hasLocal = contextReq?.localVariables?.find(v => v.key === rule.name)
 
                         let isLocal = false
@@ -147,17 +150,19 @@ export async function executeWithDependencies(
                         }
 
                         if (isLocal) {
-                            onExtract('', rule.name, val, true, contextReqId)
+                            onExtract('', rule.name, val, true, mainReqId)
                             extractedVars.push({ key: `(local) ${rule.name}`, value: val })
                             if (localScopeCache) {
                                 localScopeCache[rule.name] = val
                             }
-                            if (contextReq && contextReq.localVariables) {
-                                const varIndex = contextReq.localVariables.findIndex(v => v.key === rule.name)
+                            const localVars = contextReq?.localVariables
+                            if (localVars) {
+                                const varIndex = localVars.findIndex(v => v.key === rule.name)
                                 if (varIndex >= 0) {
-                                    contextReq.localVariables[varIndex].value = val
+                                    const existingVar = localVars[varIndex]
+                                    if (existingVar) existingVar.value = val
                                 } else {
-                                    contextReq.localVariables.push({ key: rule.name, value: val, enabled: true })
+                                    localVars.push({ key: rule.name, value: val, enabled: true })
                                 }
                             }
                         } else if (targetEnvId) {
@@ -168,14 +173,15 @@ export async function executeWithDependencies(
                             if (env) {
                                 const varIndex = env.variables.findIndex(v => v.key === rule.name)
                                 if (varIndex >= 0) {
-                                    env.variables[varIndex].value = val
+                                    const existingVar = env.variables[varIndex]
+                                    if (existingVar) existingVar.value = val
                                 } else {
                                     env.variables.push({ key: rule.name, value: val, enabled: true })
                                 }
                             }
                         }
                     }
-                } catch (e) {}
+                } catch { /* empty */ }
             })
         }
 
@@ -184,7 +190,7 @@ export async function executeWithDependencies(
         logs.push({
             requestId: request.id,
             requestName: request.name,
-            status: res.response?.status || 0,
+            status: res.response?.status ?? 0,
             timeMs: res.timeMs,
             extractedVariables: extractedVars,
             error: res.error,
@@ -192,15 +198,16 @@ export async function executeWithDependencies(
         })
 
         return { ...res, logs }
-    } catch (e: any) {
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e)
         logs.push({
             requestId: request.id,
             requestName: request.name,
             status: 0,
             timeMs: 0,
             extractedVariables: [],
-            error: e.message
+            error: message
         })
-        return { error: e.message, timeMs: 0, logs }
+        return { error: message, timeMs: 0, logs }
     }
 }
