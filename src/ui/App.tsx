@@ -4,7 +4,7 @@ import { importExternalCollection, exportExternalCollection } from '../importExp
 import { Notice } from 'obsidian'
 import { PreRequestsTab } from './PreRequestsTab'
 import { executeWithDependencies } from '../preRequests'
-import { formatAndHighlightResponseBody } from './formatter'
+import { formatAndHighlightResponseBody, highlightJsonText } from './formatter'
 
 interface AppProps {
     data: CollectionData
@@ -872,43 +872,77 @@ const HighlightedInput = ({ value, onChange, className, style, placeholder, coll
 }
 
 const RawBodyEditor = ({ value, onChange }: { value: string, onChange: (val: string) => void }) => {
-    const [isFocused, setIsFocused] = React.useState(false)
     const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+    const highlightRef = React.useRef<HTMLPreElement>(null)
 
-    React.useEffect(() => {
-        if (isFocused && textareaRef.current) {
-            textareaRef.current.focus()
+    const handleScroll = () => {
+        if (textareaRef.current && highlightRef.current) {
+            highlightRef.current.scrollTop = textareaRef.current.scrollTop
+            highlightRef.current.scrollLeft = textareaRef.current.scrollLeft
         }
-    }, [isFocused])
+    }
 
-    if (isFocused) {
-        return (
-            <textarea
-                ref={textareaRef}
-                style={{ flex: 1, width: '100%', minHeight: '150px', fontFamily: 'var(--font-monospace)', background: 'var(--background-primary)', color: 'var(--text-normal)', border: '1px solid var(--interactive-accent)', padding: '10px', borderRadius: '4px', resize: 'vertical' }}
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                onBlur={() => setIsFocused(false)}
-                placeholder={'{\n  "key": "value"\n}'}
-            />
-        )
+    const highlighted = React.useMemo(() => {
+        if (!value) return ''
+        try {
+            return highlightJsonText(value)
+        } catch {
+            return value
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+        }
+    }, [value])
+
+    const sharedStyle: React.CSSProperties = {
+        fontFamily: 'var(--font-monospace)',
+        fontSize: 'inherit',
+        lineHeight: 'inherit',
+        padding: '10px',
+        border: '1px solid var(--background-modifier-border)',
+        borderRadius: '4px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        overflow: 'auto'
     }
 
     return (
-        <div
-            style={{ flex: 1, width: '100%', minHeight: '150px', fontFamily: 'var(--font-monospace)', background: 'var(--background-primary)', color: 'var(--text-normal)', border: '1px solid var(--background-modifier-border)', padding: '10px', borderRadius: '4px', cursor: 'text', overflowY: 'auto' }}
-            onClick={() => setIsFocused(true)}
-        >
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {(() => {
-                    if (!value) return <span style={{ color: 'var(--text-faint)' }}>{'{\n  "key": "value"\n}'}</span>
-                    const formatted = formatAndHighlightResponseBody(value, '')
-                    if (formatted.isHtml) {
-                        return <code dangerouslySetInnerHTML={{ __html: formatted.content }} />
-                    }
-                    return formatted.content
-                })()}
-            </pre>
+        <div style={{ position: 'relative', flex: 1, minHeight: '150px' }}>
+            <pre
+                ref={highlightRef}
+                aria-hidden="true"
+                style={{
+                    ...sharedStyle,
+                    position: 'absolute',
+                    inset: 0,
+                    margin: 0,
+                    background: 'transparent',
+                    color: 'var(--text-normal)',
+                    pointerEvents: 'none'
+                }}
+                dangerouslySetInnerHTML={{
+                    __html: highlighted
+                        ? highlighted
+                        : '<span style="color: var(--text-faint)">{\n  "key": "value"\n}</span>'
+                }}
+            />
+            <textarea
+                ref={textareaRef}
+                style={{
+                    ...sharedStyle,
+                    position: 'relative',
+                    width: '100%',
+                    minHeight: '150px',
+                    resize: 'vertical',
+                    background: 'transparent',
+                    color: 'transparent',
+                    caretColor: 'var(--text-normal)'
+                }}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                onScroll={handleScroll}
+                placeholder={'{\n  "key": "value"\n}'}
+            />
         </div>
     )
 }
