@@ -86,6 +86,27 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         onSave(newData)
     }
 
+    const isDuplicateName = (name: string, folderId: string | undefined, excludeId: string): boolean => {
+        return collectionData.requests.some(r =>
+            r.id !== excludeId &&
+            r.folderId === folderId &&
+            r.name.toLowerCase() === name.toLowerCase()
+        )
+    }
+
+    const getUniqueName = (baseName: string, folderId: string | undefined, excludeId?: string): string => {
+        const siblingNames = collectionData.requests
+            .filter(r => r.id !== excludeId && r.folderId === folderId)
+            .map(r => r.name)
+        let name = baseName
+        let counter = 2
+        while (siblingNames.includes(name)) {
+            name = `${baseName} ${counter}`
+            counter++
+        }
+        return name
+    }
+
     const activeReq = collectionData.requests.find(r => r.id === activeReqId)
 
     const isSearching = searchQuery.length > 0
@@ -250,7 +271,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const newReq: RequestItem = {
             id: Date.now().toString(),
             itemType: 'request',
-            name: 'New Request',
+            name: getUniqueName('New Request', folderId),
             method: 'GET',
             url: '',
             headers: [],
@@ -275,7 +296,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const newFolder: RequestItem = {
             id: Date.now().toString(),
             itemType: 'folder',
-            name: 'New Folder',
+            name: getUniqueName('New Folder', undefined),
             method: 'GET',
             url: '',
             headers: [],
@@ -402,8 +423,23 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
     }
 
     const saveFolderName = (folderId: string, newName: string) => {
+        const folder = collectionData.requests.find(r => r.id === folderId)
+        if (!folder) return
+
+        const trimmed = newName.trim()
+        if (!trimmed) {
+            setEditingFolderId(null)
+            return
+        }
+
+        if (isDuplicateName(trimmed, folder.folderId, folderId)) {
+            new Notice('An item with this name already exists at this level')
+            setEditingFolderId(null)
+            return
+        }
+
         const newRequests = collectionData.requests.map(r =>
-            r.id === folderId ? { ...r, name: newName } : r
+            r.id === folderId ? { ...r, name: trimmed } : r
         )
         handleSave({ ...collectionData, requests: newRequests })
         setEditingFolderId(null)
@@ -674,49 +710,39 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
 }
 
 const FolderNameEditor = ({ folder, onSave, onCancel }: { folder: RequestItem, onSave: (name: string) => void, onCancel: () => void }) => {
-    const spanRef = React.useRef<HTMLSpanElement>(null)
+    const inputRef = React.useRef<HTMLInputElement>(null)
+    const [value, setValue] = React.useState(folder.name)
 
     React.useEffect(() => {
-        const span = spanRef.current
-        if (span) {
-            span.focus()
-            const range = document.createRange()
-            range.selectNodeContents(span)
-            const sel = window.getSelection()
-            if (sel) {
-                sel.removeAllRanges()
-                sel.addRange(range)
-            }
-        }
+        inputRef.current?.focus()
+        inputRef.current?.select()
     }, [])
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             e.preventDefault()
-            spanRef.current?.blur()
+            inputRef.current?.blur()
         } else if (e.key === 'Escape') {
-            if (spanRef.current) spanRef.current.textContent = folder.name
+            e.preventDefault()
             onCancel()
         }
     }
 
     const handleBlur = () => {
-        const newName = spanRef.current?.textContent ?? folder.name
-        onSave(newName)
+        onSave(value)
     }
 
     return (
-        <span
-            ref={spanRef}
-            className="obsidian-request-folder-name"
-            contentEditable
-            suppressContentEditableWarning
-            onClick={(e) => e.stopPropagation()}
+        <input
+            ref={inputRef}
+            type="text"
+            className="obsidian-request-folder-name-input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-        >
-            {folder.name}
-        </span>
+            onClick={(e) => e.stopPropagation()}
+        />
     )
 }
 
@@ -1112,7 +1138,26 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                     className="obsidian-request-request-title-input"
                     value={localName}
                     onChange={(e) => setLocalName(e.target.value)}
-                    onBlur={() => { if (localName !== request.name) onChange({ ...request, name: localName }) }}
+                    onBlur={() => {
+                        if (localName !== request.name) {
+                            const trimmed = localName.trim()
+                            if (!trimmed) {
+                                setLocalName(request.name)
+                                return
+                            }
+                            const duplicate = collectionData.requests.some(r =>
+                                r.id !== request.id &&
+                                r.folderId === request.folderId &&
+                                r.name.toLowerCase() === trimmed.toLowerCase()
+                            )
+                            if (duplicate) {
+                                new Notice('An item with this name already exists at this level')
+                                setLocalName(request.name)
+                            } else {
+                                onChange({ ...request, name: trimmed })
+                            }
+                        }
+                    }}
                     onKeyDown={(e) => { if(e.key === 'Enter') { e.currentTarget.blur() } }}
                     placeholder="Request Name"
                 />

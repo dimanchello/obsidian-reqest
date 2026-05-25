@@ -57,8 +57,10 @@ export default class ObsidianRequestPlugin extends Plugin {
 
         const reactRoot = container.createDiv({ cls: 'obsidian-request-root', attr: { style: 'height: 100%; width: 100%;' } })
         const root = createRoot(reactRoot)
+        let unmounted = false
 
         loadCollection(this.app, pluginDir, collectionName).then(data => {
+            if (unmounted) return
             root.render(
                 React.createElement(App, {
                     data,
@@ -72,6 +74,7 @@ export default class ObsidianRequestPlugin extends Plugin {
 
         ctx.addChild(new (class extends MarkdownRenderChild {
             onunload() {
+                unmounted = true
                 root.unmount()
             }
         })(el))

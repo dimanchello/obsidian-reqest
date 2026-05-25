@@ -541,12 +541,20 @@
     cursor: pointer;
 }
 
-.obsidian-request-folder-name[contenteditable="true"] {
-    overflow: visible;
-    text-overflow: clip;
+.obsidian-request-folder-name-input {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 0;
+    padding: 0 2px;
+    line-height: normal;
     cursor: text;
+    border: none;
     border-bottom: 1px solid var(--interactive-accent);
     outline: none;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
     user-select: text;
     -webkit-user-select: text;
 }
