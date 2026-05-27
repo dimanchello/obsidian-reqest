@@ -88,7 +88,7 @@ export async function executeRequest(
     const requiresNode = hasFiles || hasBinaryBody || request.settings.verifySsl === false
 
     if (requiresNode) {
-        return await executeNodeRequest(url, request, headers, activeEnv)
+        return await executeNodeRequest(url, request, headers, activeEnv, localScopeCache)
     }
 
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -166,11 +166,23 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
     const startTime = Date.now()
     return new Promise<RequestResult>((resolve) => {
         try {
-            let reqBody: FormData | fs.ReadStream | null = null
+            let reqBody: FormData | fs.ReadStream | string | null = null
             let reqHeaders = { ...headers }
 
             if (request.method !== 'GET' && request.method !== 'HEAD') {
-                if (request.bodyType === 'form-data') {
+                if (request.bodyType === 'json' || request.bodyType === 'raw') {
+                    reqBody = substituteVariables(request.bodyRaw, activeEnv, localScopeCache)
+                    if (request.bodyType === 'json' && !reqHeaders['Content-Type']) {
+                        reqHeaders['Content-Type'] = 'application/json'
+                    }
+                } else if (request.bodyType === 'x-www-form-urlencoded') {
+                    reqHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
+                    const params = new URLSearchParams()
+                    for (const field of request.bodyFormUrlEncoded.filter(f => f.enabled && f.key)) {
+                        params.append(substituteVariables(field.key, activeEnv, localScopeCache), substituteVariables(field.value, activeEnv, localScopeCache))
+                    }
+                    reqBody = params.toString()
+                } else if (request.bodyType === 'form-data') {
                     const form = new FormData()
                     for (const field of request.bodyFormData.filter(f => f.enabled && f.key)) {
                         const fieldName = substituteVariables(field.key, activeEnv, localScopeCache)
@@ -249,13 +261,11 @@ async function executeNodeRequest(url: string, request: RequestItem, headers: Re
                 resolve({ error: e.message, timeMs: Date.now() - startTime })
             })
 
-            if (reqBody) {
-                if ('pipe' in reqBody) {
-                    reqBody.pipe(req)
-                } else {
-                    req.write(reqBody)
-                    req.end()
-                }
+            if (typeof reqBody === 'string') {
+                req.write(reqBody)
+                req.end()
+            } else if (reqBody) {
+                reqBody.pipe(req)
             } else {
                 req.end()
             }

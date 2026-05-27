@@ -360,6 +360,11 @@
     100% { transform: rotate(360deg); }
 }
 
+/* Sidebar backdrop for mobile */
+.obsidian-request-sidebar-backdrop {
+    display: none;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .obsidian-request-sidebar {
@@ -372,14 +377,47 @@
     .obsidian-request-sidebar.mobile-open {
         transform: translateX(0);
     }
+    .obsidian-request-sidebar-backdrop {
+        display: block;
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.3);
+        z-index: 49;
+    }
     .obsidian-request-mobile-header {
         display: flex;
     }
+
+    /* Compact URL bar for mobile */
     .obsidian-request-url-bar {
-        flex-direction: column;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        gap: 6px;
+        border: none;
+        background: transparent;
+        margin-bottom: 12px;
     }
-    .obsidian-request-url-bar select { border-right: none; border-bottom: 1px solid var(--background-modifier-border); }
-    .obsidian-request-url-bar button { padding: 15px; }
+    .obsidian-request-url-bar select {
+        width: auto;
+        min-width: 62px;
+        padding: 6px 6px;
+        font-size: 12px;
+        border: 1px solid var(--background-modifier-border-hover);
+        border-radius: 6px;
+        background-color: var(--background-secondary);
+    }
+    .obsidian-request-url-bar .obsidian-request-highlighted-input-container {
+        border: 1px solid var(--background-modifier-border-hover);
+        border-radius: 6px;
+        min-width: 0;
+        padding: 4px 10px;
+    }
+    .obsidian-request-url-bar button {
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
 
     .obsidian-request-modal {
         width: 95%;

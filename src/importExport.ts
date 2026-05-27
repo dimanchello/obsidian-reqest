@@ -43,7 +43,7 @@ function extractRequests(items: ExternalItem[], parentFolderId?: string): Reques
                 id: folderId,
                 name: item.name || 'Folder',
                 itemType: 'folder'
-            }))
+            }) as RequestItem)
             requests = requests.concat(extractRequests(item.item, folderId))
         } else if (item.request) {
             const req = item.request
@@ -114,7 +114,7 @@ function extractRequests(items: ExternalItem[], parentFolderId?: string): Reques
                 bodyFormData,
                 auth: authConfig as unknown as RequestItem['auth'],
                 folderId: parentFolderId
-            }))
+            }) as RequestItem)
         }
     }
 
@@ -125,7 +125,7 @@ export function importExternalCollection(jsonString: string): RequestItem[] {
     try {
         const data = JSON.parse(jsonString) as ExternalCollection
         if (data?.item) {
-            return extractRequests(data.item).map(normalizeRequest)
+            return extractRequests(data.item).map(normalizeRequest).filter((r): r is RequestItem => r !== null && r !== undefined)
         }
         return []
     } catch (e) {

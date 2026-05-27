@@ -1,4 +1,4 @@
-import { Plugin, TFile, MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian'
+import { Plugin, TFile, MarkdownPostProcessorContext, MarkdownRenderChild, Editor } from 'obsidian'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
@@ -16,6 +16,24 @@ export default class ObsidianRequestPlugin extends Plugin {
 
     async onload(): Promise<void> {
         this.registerMarkdownCodeBlockProcessor('request-collection', this.handleCodeBlock.bind(this))
+
+        this.addCommand({
+            id: 'insert-request-collection',
+            name: 'Insert Request Collection Template',
+            editorCallback: (editor: Editor) => {
+                const template = '```request-collection\n\n```'
+                const doc = editor.getDoc()
+                const currentLine = doc.getCursor().line
+                const lineContent = doc.getLine(currentLine)
+
+                if (lineContent.trim() === '') {
+                    doc.setLine(currentLine, template)
+                    doc.setCursor({ line: currentLine, ch: template.indexOf('\n\n') + 1 })
+                } else {
+                    doc.replaceRange(`${template}\n`, doc.getCursor())
+                }
+            }
+        })
 
         this.registerEvent(
             this.app.vault.on('rename', async (file, oldPath) => {

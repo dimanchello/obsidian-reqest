@@ -43,6 +43,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
     const [showExportModal, setShowExportModal] = React.useState(false)
     const [contextMenu, setContextMenu] = React.useState<{ x: number, y: number, folderId: string } | null>(null)
     const [editingFolderId, setEditingFolderId] = React.useState<string | null>(null)
+    const fileInputRef = React.useRef<HTMLInputElement>(null)
 
     React.useEffect(() => {
         setCollectionData(data)
@@ -214,7 +215,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const draggedItem = newRequests[draggedIdx]
         const targetItem = collectionData.requests.find(r => r.id === targetId)
 
-        if (!targetItem) {
+        if (!draggedItem || !targetItem) {
             setDraggedItemId(null)
             setDropTargetId(null)
             return
@@ -254,8 +255,9 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
 
         // Remove dragged item from its current position
         newRequests.splice(draggedIdx, 1)
-        // Insert at new position
-        newRequests.splice(newPosition, 0, draggedItem)
+        // Adjust insertion index: after removal, items after draggedIdx shift by 1
+        const insertAt = draggedIdx < newPosition ? newPosition - 1 : newPosition
+        newRequests.splice(insertAt, 0, draggedItem)
 
         handleSave({ ...collectionData, requests: newRequests })
         setDraggedItemId(null)
@@ -355,42 +357,42 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         setContextMenu({ x, y, folderId })
     }
 
-    const handleImport = async () => {
+    const handleImport = () => {
+        fileInputRef.current?.click()
+    }
+
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        const input = e.target
+        if (!file) return
+
         try {
-            const win = window as { require: (mod: string) => unknown }
-            const electron = win.require('electron') as { remote: { dialog: { showOpenDialog: (opts: Record<string, unknown>) => Promise<{ canceled: boolean; filePaths: string[] }> } } }
-            const fs = win.require('fs') as { readFileSync: (path: string, encoding: string) => string }
-            const result = await electron.remote.dialog.showOpenDialog({
-                properties: ['openFile'],
-                filters: [{ name: 'JSON', extensions: ['json'] }]
-            })
+            const content = await file.text()
 
-            if (!result.canceled && result.filePaths.length > 0) {
-                const content = fs.readFileSync(result.filePaths[0]!, 'utf8')
-
-                try {
-                    const parsed = JSON.parse(content)
-                    if (parsed.requests && Array.isArray(parsed.requests) && parsed.environments) {
-                        const nativeReqs = parsed.requests.map((r: Record<string, unknown>) => {
-                            return { ...r, id: Date.now().toString() + Math.random().toString(36).substring(7) }
-                        })
-                        handleSave({ ...collectionData, requests: [...collectionData.requests, ...nativeReqs] })
-                        new Notice(`Successfully imported ${nativeReqs.length} requests in native format!`)
-                        return
-                    }
-                } catch { /* empty */ }
-
-                const importedRequests = importExternalCollection(content)
-                if (importedRequests.length > 0) {
-                    handleSave({ ...collectionData, requests: [...collectionData.requests, ...importedRequests] })
-                    new Notice(`Successfully imported ${importedRequests.length} requests!`)
-                } else {
-                    new Notice('No requests found in the imported file.')
+            try {
+                const parsed = JSON.parse(content)
+                if (parsed.requests && Array.isArray(parsed.requests) && parsed.environments) {
+                    const nativeReqs = parsed.requests.map((r: Record<string, unknown>) => {
+                        return { ...r, id: Date.now().toString() + Math.random().toString(36).substring(7) }
+                    })
+                    handleSave({ ...collectionData, requests: [...collectionData.requests, ...nativeReqs] })
+                    new Notice(`Successfully imported ${nativeReqs.length} requests in native format!`)
+                    return
                 }
+            } catch { /* empty */ }
+
+            const importedRequests = importExternalCollection(content)
+            if (importedRequests.length > 0) {
+                handleSave({ ...collectionData, requests: [...collectionData.requests, ...importedRequests] })
+                new Notice(`Successfully imported ${importedRequests.length} requests!`)
+            } else {
+                new Notice('No requests found in the imported file.')
             }
         } catch (err: unknown) {
             new Notice(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
         }
+
+        input.value = '' as unknown as string
     }
 
     const handleExport = (format: 'external' | 'native') => {
@@ -583,14 +585,21 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
                             <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={handleImport}>Import</button>
                             <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={() => setShowExportModal(true)}>Export</button>
                         </div>
+                        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} />
                     </div>
                 </div>
+
+                {mobileSidebarOpen && window.innerWidth <= 768 && (
+                    <div className="obsidian-request-sidebar-backdrop" onClick={() => setMobileSidebarOpen(false)} />
+                )}
 
                 {window.innerWidth > 768 && <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing}></div>}
 
                 <div className="obsidian-request-main">
                     <div className="obsidian-request-mobile-header">
-                        <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>☰</button>
+                        <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+                            {mobileSidebarOpen ? '✕' : '☰'}
+                        </button>
                         <span style={{ fontWeight: 'bold' }}>API Collection</span>
                     </div>
 
@@ -971,6 +980,19 @@ const RawBodyEditor = ({ value, onChange }: { value: string, onChange: (val: str
             />
         </div>
     )
+}
+
+const ImagePreview = ({ arrayBuffer, contentType }: { arrayBuffer?: ArrayBuffer, contentType?: string }) => {
+    const [blobUrl, setBlobUrl] = React.useState<string | null>(null)
+
+    React.useEffect(() => {
+        const url = URL.createObjectURL(new Blob([arrayBuffer ?? new ArrayBuffer(0)], { type: contentType ?? 'image/png' }))
+        setBlobUrl(url)
+        return () => URL.revokeObjectURL(url)
+    }, [arrayBuffer, contentType])
+
+    if (!blobUrl) return null
+    return <img src={blobUrl} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
 }
 
 const RequestEditor = ({ request, collectionData, onChange, onExtract }: { request: RequestItem, collectionData: CollectionData, onChange: (req: RequestItem) => void, onExtract: (envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => void }) => {
@@ -1454,9 +1476,9 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                             {response.response && responseSubTab === 'Body' && responseMode === 'preview' && (
                                 <div style={{ width: '100%', height: '100%', background: 'white' }}>
                                     {response.response.contentType?.includes('image') ? (
-                                        <img
-                                            src={URL.createObjectURL(new Blob([response.response.arrayBuffer ?? new ArrayBuffer(0)], { type: response.response.contentType }))}
-                                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                                        <ImagePreview
+                                            arrayBuffer={response.response.arrayBuffer}
+                                            contentType={response.response.contentType}
                                         />
                                     ) : (
                                         <iframe

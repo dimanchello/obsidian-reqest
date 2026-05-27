@@ -152,33 +152,10 @@ export async function executeWithDependencies(
                         if (isLocal) {
                             onExtract('', rule.name, val, true, mainReqId)
                             extractedVars.push({ key: `(local) ${rule.name}`, value: val })
-                            if (localScopeCache) {
-                                localScopeCache[rule.name] = val
-                            }
-                            const localVars = contextReq?.localVariables
-                            if (localVars) {
-                                const varIndex = localVars.findIndex(v => v.key === rule.name)
-                                if (varIndex >= 0) {
-                                    const existingVar = localVars[varIndex]
-                                    if (existingVar) existingVar.value = val
-                                } else {
-                                    localVars.push({ key: rule.name, value: val, enabled: true })
-                                }
-                            }
+                            localScopeCache[rule.name] = val
                         } else if (targetEnvId) {
                             onExtract(targetEnvId, rule.name, val, false)
                             extractedVars.push({ key: rule.name, value: val })
-
-                            const env = collectionData.environments.find(e => e.id === targetEnvId)
-                            if (env) {
-                                const varIndex = env.variables.findIndex(v => v.key === rule.name)
-                                if (varIndex >= 0) {
-                                    const existingVar = env.variables[varIndex]
-                                    if (existingVar) existingVar.value = val
-                                } else {
-                                    env.variables.push({ key: rule.name, value: val, enabled: true })
-                                }
-                            }
                         }
                     }
                 } catch { /* empty */ }
