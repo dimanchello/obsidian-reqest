@@ -17,9 +17,14 @@ export default class ObsidianRequestPlugin extends Plugin {
     async onload(): Promise<void> {
         this.registerMarkdownCodeBlockProcessor('request-collection', this.handleCodeBlock.bind(this))
 
+        const lang = ((window.localStorage.getItem('language') ?? navigator.language) || '').slice(0, 2)
+        const cmdName = lang === 'ru'
+            ? 'Вставить шаблон коллекции запросов'
+            : 'Insert Request Collection Template'
+
         this.addCommand({
             id: 'insert-request-collection',
-            name: 'Insert Request Collection Template',
+            name: cmdName,
             editorCallback: (editor: Editor) => {
                 const template = '```request-collection\n\n```'
                 const doc = editor.getDoc()

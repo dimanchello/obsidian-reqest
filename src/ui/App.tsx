@@ -60,26 +60,34 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         }
     }, [contextMenu])
 
-    const startSidebarResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const getClientX = (e: MouseEvent | TouchEvent): number => {
+        return 'touches' in e ? e.touches[0]!.clientX : e.clientX
+    }
+
+    const startSidebarResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
         e.preventDefault()
-        const startX = e.clientX
+        const startX = 'touches' in e ? e.touches[0]!.clientX : e.clientX
         const startWidth = sidebarWidth
 
-        const doDrag = (dragEvent: MouseEvent) => {
-            const deltaX = dragEvent.clientX - startX
-            setSidebarWidth(Math.min(Math.max(startWidth + deltaX, 150), 500))
+        const doDrag = (dragEvent: MouseEvent | TouchEvent) => {
+            const currentX = getClientX(dragEvent)
+            setSidebarWidth(Math.min(Math.max(startWidth + (currentX - startX), 150), 500))
         }
 
-        const stopDrag = (dragEvent: MouseEvent) => {
+        const stopDrag = (dragEvent: MouseEvent | TouchEvent) => {
             document.removeEventListener('mousemove', doDrag)
             document.removeEventListener('mouseup', stopDrag)
-            const deltaX = dragEvent.clientX - startX
-            const finalWidth = Math.min(Math.max(startWidth + deltaX, 150), 500)
+            document.removeEventListener('touchmove', doDrag)
+            document.removeEventListener('touchend', stopDrag)
+            const currentX = getClientX(dragEvent)
+            const finalWidth = Math.min(Math.max(startWidth + (currentX - startX), 150), 500)
             onSave({ ...collectionData, uiSettings: { ...collectionData.uiSettings, sidebarWidth: finalWidth } })
         }
 
         document.addEventListener('mousemove', doDrag)
         document.addEventListener('mouseup', stopDrag)
+        document.addEventListener('touchmove', doDrag, { passive: false })
+        document.addEventListener('touchend', stopDrag)
     }, [sidebarWidth, collectionData, onSave])
 
     const handleSave = (newData: CollectionData) => {
@@ -574,7 +582,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
                         })}
 
                         <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-                            <button style={{ flex: 2, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={() => addNewRequest()}>
+                            <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={() => addNewRequest()}>
                             + Request
                             </button>
                             <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={addNewFolder}>
@@ -593,7 +601,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
                     <div className="obsidian-request-sidebar-backdrop" onClick={() => setMobileSidebarOpen(false)} />
                 )}
 
-                {window.innerWidth > 768 && <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing}></div>}
+                <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing} onTouchStart={startSidebarResizing}></div>
 
                 <div className="obsidian-request-main">
                     <div className="obsidian-request-mobile-header">
@@ -1011,14 +1019,19 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
         setLocalName(request.name)
     }, [request.id, request.name])
 
-    const startResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const getClientY = (e: MouseEvent | TouchEvent): number => {
+        return 'touches' in e ? e.touches[0]!.clientY : e.clientY
+    }
+
+    const startResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
         e.preventDefault()
-        const startY = e.clientY
+        const startY = 'touches' in e ? e.touches[0]!.clientY : e.clientY
         const startHeight = responseHeight
         const containerHeight = (document.querySelector('.obsidian-request-main') as HTMLElement | null)?.clientHeight ?? 1000
 
-        const doDrag = (dragEvent: MouseEvent) => {
-            const deltaY = startY - dragEvent.clientY
+        const doDrag = (dragEvent: MouseEvent | TouchEvent) => {
+            const currentY = getClientY(dragEvent)
+            const deltaY = startY - currentY
             const deltaPercent = (deltaY / containerHeight) * 100
             setResponseHeight(Math.min(Math.max(startHeight + deltaPercent, 10), 85))
         }
@@ -1026,10 +1039,14 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
         const stopDrag = () => {
             document.removeEventListener('mousemove', doDrag)
             document.removeEventListener('mouseup', stopDrag)
+            document.removeEventListener('touchmove', doDrag)
+            document.removeEventListener('touchend', stopDrag)
         }
 
         document.addEventListener('mousemove', doDrag)
         document.addEventListener('mouseup', stopDrag)
+        document.addEventListener('touchmove', doDrag, { passive: false })
+        document.addEventListener('touchend', stopDrag)
     }, [responseHeight])
 
     const handleSend = async () => {
@@ -1419,7 +1436,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                 )}
             </div>
 
-            <div className="obsidian-request-resizer" onMouseDown={startResizing} title="Drag to resize response view"></div>
+            <div className="obsidian-request-resizer" onMouseDown={startResizing} onTouchStart={startResizing} title="Drag to resize response view"></div>
 
             <div className="obsidian-request-response-area" style={{ height: `${responseHeight}%` }}>
                 <div className="obsidian-request-response-header">
