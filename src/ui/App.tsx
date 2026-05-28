@@ -43,6 +43,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
     const [showExportModal, setShowExportModal] = React.useState(false)
     const [contextMenu, setContextMenu] = React.useState<{ x: number, y: number, folderId: string } | null>(null)
     const [editingFolderId, setEditingFolderId] = React.useState<string | null>(null)
+    const fileInputRef = React.useRef<HTMLInputElement>(null)
 
     React.useEffect(() => {
         setCollectionData(data)
@@ -59,31 +60,60 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         }
     }, [contextMenu])
 
-    const startSidebarResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const getClientX = (e: MouseEvent | TouchEvent): number => {
+        return 'touches' in e ? e.touches[0]!.clientX : e.clientX
+    }
+
+    const startSidebarResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
         e.preventDefault()
-        const startX = e.clientX
+        const startX = 'touches' in e ? e.touches[0]!.clientX : e.clientX
         const startWidth = sidebarWidth
 
-        const doDrag = (dragEvent: MouseEvent) => {
-            const deltaX = dragEvent.clientX - startX
-            setSidebarWidth(Math.min(Math.max(startWidth + deltaX, 150), 500))
+        const doDrag = (dragEvent: MouseEvent | TouchEvent) => {
+            const currentX = getClientX(dragEvent)
+            setSidebarWidth(Math.min(Math.max(startWidth + (currentX - startX), 150), 500))
         }
 
-        const stopDrag = (dragEvent: MouseEvent) => {
+        const stopDrag = (dragEvent: MouseEvent | TouchEvent) => {
             document.removeEventListener('mousemove', doDrag)
             document.removeEventListener('mouseup', stopDrag)
-            const deltaX = dragEvent.clientX - startX
-            const finalWidth = Math.min(Math.max(startWidth + deltaX, 150), 500)
+            document.removeEventListener('touchmove', doDrag)
+            document.removeEventListener('touchend', stopDrag)
+            const currentX = getClientX(dragEvent)
+            const finalWidth = Math.min(Math.max(startWidth + (currentX - startX), 150), 500)
             onSave({ ...collectionData, uiSettings: { ...collectionData.uiSettings, sidebarWidth: finalWidth } })
         }
 
         document.addEventListener('mousemove', doDrag)
         document.addEventListener('mouseup', stopDrag)
+        document.addEventListener('touchmove', doDrag, { passive: false })
+        document.addEventListener('touchend', stopDrag)
     }, [sidebarWidth, collectionData, onSave])
 
     const handleSave = (newData: CollectionData) => {
         setCollectionData(newData)
         onSave(newData)
+    }
+
+    const isDuplicateName = (name: string, folderId: string | undefined, excludeId: string): boolean => {
+        return collectionData.requests.some(r =>
+            r.id !== excludeId &&
+            r.folderId === folderId &&
+            r.name.toLowerCase() === name.toLowerCase()
+        )
+    }
+
+    const getUniqueName = (baseName: string, folderId: string | undefined, excludeId?: string): string => {
+        const siblingNames = collectionData.requests
+            .filter(r => r.id !== excludeId && r.folderId === folderId)
+            .map(r => r.name)
+        let name = baseName
+        let counter = 2
+        while (siblingNames.includes(name)) {
+            name = `${baseName} ${counter}`
+            counter++
+        }
+        return name
     }
 
     const activeReq = collectionData.requests.find(r => r.id === activeReqId)
@@ -193,7 +223,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const draggedItem = newRequests[draggedIdx]
         const targetItem = collectionData.requests.find(r => r.id === targetId)
 
-        if (!targetItem) {
+        if (!draggedItem || !targetItem) {
             setDraggedItemId(null)
             setDropTargetId(null)
             return
@@ -233,8 +263,9 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
 
         // Remove dragged item from its current position
         newRequests.splice(draggedIdx, 1)
-        // Insert at new position
-        newRequests.splice(newPosition, 0, draggedItem)
+        // Adjust insertion index: after removal, items after draggedIdx shift by 1
+        const insertAt = draggedIdx < newPosition ? newPosition - 1 : newPosition
+        newRequests.splice(insertAt, 0, draggedItem)
 
         handleSave({ ...collectionData, requests: newRequests })
         setDraggedItemId(null)
@@ -250,7 +281,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const newReq: RequestItem = {
             id: Date.now().toString(),
             itemType: 'request',
-            name: 'New Request',
+            name: getUniqueName('New Request', folderId),
             method: 'GET',
             url: '',
             headers: [],
@@ -275,7 +306,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         const newFolder: RequestItem = {
             id: Date.now().toString(),
             itemType: 'folder',
-            name: 'New Folder',
+            name: getUniqueName('New Folder', undefined),
             method: 'GET',
             url: '',
             headers: [],
@@ -334,42 +365,42 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
         setContextMenu({ x, y, folderId })
     }
 
-    const handleImport = async () => {
+    const handleImport = () => {
+        fileInputRef.current?.click()
+    }
+
+    const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        const input = e.target
+        if (!file) return
+
         try {
-            const win = window as { require: (mod: string) => unknown }
-            const electron = win.require('electron') as { remote: { dialog: { showOpenDialog: (opts: Record<string, unknown>) => Promise<{ canceled: boolean; filePaths: string[] }> } } }
-            const fs = win.require('fs') as { readFileSync: (path: string, encoding: string) => string }
-            const result = await electron.remote.dialog.showOpenDialog({
-                properties: ['openFile'],
-                filters: [{ name: 'JSON', extensions: ['json'] }]
-            })
+            const content = await file.text()
 
-            if (!result.canceled && result.filePaths.length > 0) {
-                const content = fs.readFileSync(result.filePaths[0]!, 'utf8')
-
-                try {
-                    const parsed = JSON.parse(content)
-                    if (parsed.requests && Array.isArray(parsed.requests) && parsed.environments) {
-                        const nativeReqs = parsed.requests.map((r: Record<string, unknown>) => {
-                            return { ...r, id: Date.now().toString() + Math.random().toString(36).substring(7) }
-                        })
-                        handleSave({ ...collectionData, requests: [...collectionData.requests, ...nativeReqs] })
-                        new Notice(`Successfully imported ${nativeReqs.length} requests in native format!`)
-                        return
-                    }
-                } catch { /* empty */ }
-
-                const importedRequests = importExternalCollection(content)
-                if (importedRequests.length > 0) {
-                    handleSave({ ...collectionData, requests: [...collectionData.requests, ...importedRequests] })
-                    new Notice(`Successfully imported ${importedRequests.length} requests!`)
-                } else {
-                    new Notice('No requests found in the imported file.')
+            try {
+                const parsed = JSON.parse(content)
+                if (parsed.requests && Array.isArray(parsed.requests) && parsed.environments) {
+                    const nativeReqs = parsed.requests.map((r: Record<string, unknown>) => {
+                        return { ...r, id: Date.now().toString() + Math.random().toString(36).substring(7) }
+                    })
+                    handleSave({ ...collectionData, requests: [...collectionData.requests, ...nativeReqs] })
+                    new Notice(`Successfully imported ${nativeReqs.length} requests in native format!`)
+                    return
                 }
+            } catch { /* empty */ }
+
+            const importedRequests = importExternalCollection(content)
+            if (importedRequests.length > 0) {
+                handleSave({ ...collectionData, requests: [...collectionData.requests, ...importedRequests] })
+                new Notice(`Successfully imported ${importedRequests.length} requests!`)
+            } else {
+                new Notice('No requests found in the imported file.')
             }
         } catch (err: unknown) {
             new Notice(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
         }
+
+        input.value = '' as unknown as string
     }
 
     const handleExport = (format: 'external' | 'native') => {
@@ -402,8 +433,23 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
     }
 
     const saveFolderName = (folderId: string, newName: string) => {
+        const folder = collectionData.requests.find(r => r.id === folderId)
+        if (!folder) return
+
+        const trimmed = newName.trim()
+        if (!trimmed) {
+            setEditingFolderId(null)
+            return
+        }
+
+        if (isDuplicateName(trimmed, folder.folderId, folderId)) {
+            new Notice('An item with this name already exists at this level')
+            setEditingFolderId(null)
+            return
+        }
+
         const newRequests = collectionData.requests.map(r =>
-            r.id === folderId ? { ...r, name: newName } : r
+            r.id === folderId ? { ...r, name: trimmed } : r
         )
         handleSave({ ...collectionData, requests: newRequests })
         setEditingFolderId(null)
@@ -536,7 +582,7 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
                         })}
 
                         <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
-                            <button style={{ flex: 2, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={() => addNewRequest()}>
+                            <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={() => addNewRequest()}>
                             + Request
                             </button>
                             <button style={{ flex: 1, background: 'transparent', border: '1px dashed var(--background-modifier-border)', color: 'var(--text-muted)', padding: '6px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }} onClick={addNewFolder}>
@@ -547,14 +593,21 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
                             <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={handleImport}>Import</button>
                             <button className="btn-ghost" style={{ flex: 1, border: '1px solid var(--background-modifier-border) !important', fontSize: '11px' }} onClick={() => setShowExportModal(true)}>Export</button>
                         </div>
+                        <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} />
                     </div>
                 </div>
 
-                {window.innerWidth > 768 && <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing}></div>}
+                {mobileSidebarOpen && window.innerWidth <= 768 && (
+                    <div className="obsidian-request-sidebar-backdrop" onClick={() => setMobileSidebarOpen(false)} />
+                )}
+
+                <div className="obsidian-request-sidebar-resizer" onMouseDown={startSidebarResizing} onTouchStart={startSidebarResizing}></div>
 
                 <div className="obsidian-request-main">
                     <div className="obsidian-request-mobile-header">
-                        <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>☰</button>
+                        <button onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}>
+                            {mobileSidebarOpen ? '✕' : '☰'}
+                        </button>
                         <span style={{ fontWeight: 'bold' }}>API Collection</span>
                     </div>
 
@@ -674,49 +727,39 @@ export const App: React.FC<AppProps> = ({ data, onSave, collectionName }) => {
 }
 
 const FolderNameEditor = ({ folder, onSave, onCancel }: { folder: RequestItem, onSave: (name: string) => void, onCancel: () => void }) => {
-    const spanRef = React.useRef<HTMLSpanElement>(null)
+    const inputRef = React.useRef<HTMLInputElement>(null)
+    const [value, setValue] = React.useState(folder.name)
 
     React.useEffect(() => {
-        const span = spanRef.current
-        if (span) {
-            span.focus()
-            const range = document.createRange()
-            range.selectNodeContents(span)
-            const sel = window.getSelection()
-            if (sel) {
-                sel.removeAllRanges()
-                sel.addRange(range)
-            }
-        }
+        inputRef.current?.focus()
+        inputRef.current?.select()
     }, [])
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             e.preventDefault()
-            spanRef.current?.blur()
+            inputRef.current?.blur()
         } else if (e.key === 'Escape') {
-            if (spanRef.current) spanRef.current.textContent = folder.name
+            e.preventDefault()
             onCancel()
         }
     }
 
     const handleBlur = () => {
-        const newName = spanRef.current?.textContent ?? folder.name
-        onSave(newName)
+        onSave(value)
     }
 
     return (
-        <span
-            ref={spanRef}
-            className="obsidian-request-folder-name"
-            contentEditable
-            suppressContentEditableWarning
-            onClick={(e) => e.stopPropagation()}
+        <input
+            ref={inputRef}
+            type="text"
+            className="obsidian-request-folder-name-input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-        >
-            {folder.name}
-        </span>
+            onClick={(e) => e.stopPropagation()}
+        />
     )
 }
 
@@ -947,6 +990,19 @@ const RawBodyEditor = ({ value, onChange }: { value: string, onChange: (val: str
     )
 }
 
+const ImagePreview = ({ arrayBuffer, contentType }: { arrayBuffer?: ArrayBuffer, contentType?: string }) => {
+    const [blobUrl, setBlobUrl] = React.useState<string | null>(null)
+
+    React.useEffect(() => {
+        const url = URL.createObjectURL(new Blob([arrayBuffer ?? new ArrayBuffer(0)], { type: contentType ?? 'image/png' }))
+        setBlobUrl(url)
+        return () => URL.revokeObjectURL(url)
+    }, [arrayBuffer, contentType])
+
+    if (!blobUrl) return null
+    return <img src={blobUrl} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+}
+
 const RequestEditor = ({ request, collectionData, onChange, onExtract }: { request: RequestItem, collectionData: CollectionData, onChange: (req: RequestItem) => void, onExtract: (envId: string, key: string, value: string, isLocal: boolean, localReqId?: string) => void }) => {
     const [activeTab, setActiveTab] = React.useState('Params')
     const [response, setResponse] = React.useState<{ response?: { status: number | undefined, text: string, contentType?: string, headers: Record<string, string | string[] | undefined>, isBinary?: boolean, arrayBuffer?: ArrayBuffer }, error?: string, timeMs?: number, logs?: PreRequestLog[] } | null>(null)
@@ -963,14 +1019,19 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
         setLocalName(request.name)
     }, [request.id, request.name])
 
-    const startResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const getClientY = (e: MouseEvent | TouchEvent): number => {
+        return 'touches' in e ? e.touches[0]!.clientY : e.clientY
+    }
+
+    const startResizing = React.useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
         e.preventDefault()
-        const startY = e.clientY
+        const startY = 'touches' in e ? e.touches[0]!.clientY : e.clientY
         const startHeight = responseHeight
         const containerHeight = (document.querySelector('.obsidian-request-main') as HTMLElement | null)?.clientHeight ?? 1000
 
-        const doDrag = (dragEvent: MouseEvent) => {
-            const deltaY = startY - dragEvent.clientY
+        const doDrag = (dragEvent: MouseEvent | TouchEvent) => {
+            const currentY = getClientY(dragEvent)
+            const deltaY = startY - currentY
             const deltaPercent = (deltaY / containerHeight) * 100
             setResponseHeight(Math.min(Math.max(startHeight + deltaPercent, 10), 85))
         }
@@ -978,10 +1039,14 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
         const stopDrag = () => {
             document.removeEventListener('mousemove', doDrag)
             document.removeEventListener('mouseup', stopDrag)
+            document.removeEventListener('touchmove', doDrag)
+            document.removeEventListener('touchend', stopDrag)
         }
 
         document.addEventListener('mousemove', doDrag)
         document.addEventListener('mouseup', stopDrag)
+        document.addEventListener('touchmove', doDrag, { passive: false })
+        document.addEventListener('touchend', stopDrag)
     }, [responseHeight])
 
     const handleSend = async () => {
@@ -1112,7 +1177,26 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                     className="obsidian-request-request-title-input"
                     value={localName}
                     onChange={(e) => setLocalName(e.target.value)}
-                    onBlur={() => { if (localName !== request.name) onChange({ ...request, name: localName }) }}
+                    onBlur={() => {
+                        if (localName !== request.name) {
+                            const trimmed = localName.trim()
+                            if (!trimmed) {
+                                setLocalName(request.name)
+                                return
+                            }
+                            const duplicate = collectionData.requests.some(r =>
+                                r.id !== request.id &&
+                                r.folderId === request.folderId &&
+                                r.name.toLowerCase() === trimmed.toLowerCase()
+                            )
+                            if (duplicate) {
+                                new Notice('An item with this name already exists at this level')
+                                setLocalName(request.name)
+                            } else {
+                                onChange({ ...request, name: trimmed })
+                            }
+                        }
+                    }}
                     onKeyDown={(e) => { if(e.key === 'Enter') { e.currentTarget.blur() } }}
                     placeholder="Request Name"
                 />
@@ -1352,7 +1436,7 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                 )}
             </div>
 
-            <div className="obsidian-request-resizer" onMouseDown={startResizing} title="Drag to resize response view"></div>
+            <div className="obsidian-request-resizer" onMouseDown={startResizing} onTouchStart={startResizing} title="Drag to resize response view"></div>
 
             <div className="obsidian-request-response-area" style={{ height: `${responseHeight}%` }}>
                 <div className="obsidian-request-response-header">
@@ -1409,9 +1493,9 @@ const RequestEditor = ({ request, collectionData, onChange, onExtract }: { reque
                             {response.response && responseSubTab === 'Body' && responseMode === 'preview' && (
                                 <div style={{ width: '100%', height: '100%', background: 'white' }}>
                                     {response.response.contentType?.includes('image') ? (
-                                        <img
-                                            src={URL.createObjectURL(new Blob([response.response.arrayBuffer ?? new ArrayBuffer(0)], { type: response.response.contentType }))}
-                                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                                        <ImagePreview
+                                            arrayBuffer={response.response.arrayBuffer}
+                                            contentType={response.response.contentType}
                                         />
                                     ) : (
                                         <iframe

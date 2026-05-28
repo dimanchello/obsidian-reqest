@@ -19,7 +19,7 @@ export function getCollectionsDir(pluginDir: string): string {
     return `${pluginDir}/${COLLECTIONS_DIR}`
 }
 
-export function normalizeRequest(req: unknown): RequestItem {
+export function normalizeRequest(req: unknown): RequestItem | null | undefined {
     if (!req) return req as RequestItem
 
     const reqAny = req as Record<string, unknown>
@@ -81,13 +81,13 @@ export async function loadCollection(app: App, pluginDir: string, collectionName
             const parsed = JSON.parse(content) as CollectionData
 
             if (parsed && Array.isArray(parsed.requests)) {
-                parsed.requests = parsed.requests.map(normalizeRequest)
+                parsed.requests = parsed.requests.map(normalizeRequest).filter((r): r is RequestItem => r !== null && r !== undefined)
             }
 
             return parsed
         }
 
-        const defaultData = { ...DEFAULT_COLLECTION_DATA }
+        const defaultData = JSON.parse(JSON.stringify(DEFAULT_COLLECTION_DATA)) as CollectionData
         await saveCollection(app, pluginDir, collectionName, defaultData)
         return defaultData
     } catch (e) {

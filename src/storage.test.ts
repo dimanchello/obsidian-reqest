@@ -11,7 +11,7 @@ describe('normalizeRequest', () => {
             url: 'https://api.example.com'
         }
 
-        const normalized = normalizeRequest(req)
+        const normalized = normalizeRequest(req)!
 
         expect(normalized.id).toBe('123')
         expect(normalized.name).toBe('Test Request')
@@ -28,7 +28,7 @@ describe('normalizeRequest', () => {
             itemType: 'divider'
         }
 
-        const normalized = normalizeRequest(divider)
+        const normalized = normalizeRequest(divider)!
 
         expect(normalized.itemType).toBe('divider')
         expect(normalized.name).toBe('API Section')
@@ -41,7 +41,7 @@ describe('normalizeRequest', () => {
             headers: []
         }
 
-        const normalized = normalizeRequest(req)
+        const normalized = normalizeRequest(req)!
 
         expect(normalized.headers.length).toBeGreaterThanOrEqual(DEFAULT_AUTO_HEADERS.length)
     })
@@ -55,7 +55,7 @@ describe('normalizeRequest', () => {
             ]
         }
 
-        const normalized = normalizeRequest(req)
+        const normalized = normalizeRequest(req)!
 
         const acceptHeaders = normalized.headers.filter(h => h.key === 'Accept' && h.auto)
         expect(acceptHeaders.length).toBe(1)
@@ -64,7 +64,7 @@ describe('normalizeRequest', () => {
     it('should set default values for missing fields', () => {
         const req = { id: '1' }
 
-        const normalized = normalizeRequest(req)
+        const normalized = normalizeRequest(req)!
 
         expect(normalized.bodyRaw).toBe('')
         expect(normalized.bodyFormData).toEqual([])

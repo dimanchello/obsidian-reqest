@@ -1,4 +1,4 @@
-import { Plugin, TFile, MarkdownPostProcessorContext, MarkdownRenderChild } from 'obsidian'
+import { Plugin, TFile, MarkdownPostProcessorContext, MarkdownRenderChild, Editor } from 'obsidian'
 import * as React from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './ui/App'
@@ -16,6 +16,29 @@ export default class ObsidianRequestPlugin extends Plugin {
 
     async onload(): Promise<void> {
         this.registerMarkdownCodeBlockProcessor('request-collection', this.handleCodeBlock.bind(this))
+
+        const lang = ((window.localStorage.getItem('language') ?? navigator.language) || '').slice(0, 2)
+        const cmdName = lang === 'ru'
+            ? 'Вставить шаблон коллекции запросов'
+            : 'Insert Request Collection Template'
+
+        this.addCommand({
+            id: 'insert-request-collection',
+            name: cmdName,
+            editorCallback: (editor: Editor) => {
+                const template = '```request-collection\n\n```'
+                const doc = editor.getDoc()
+                const currentLine = doc.getCursor().line
+                const lineContent = doc.getLine(currentLine)
+
+                if (lineContent.trim() === '') {
+                    doc.setLine(currentLine, template)
+                    doc.setCursor({ line: currentLine, ch: template.indexOf('\n\n') + 1 })
+                } else {
+                    doc.replaceRange(`${template}\n`, doc.getCursor())
+                }
+            }
+        })
 
         this.registerEvent(
             this.app.vault.on('rename', async (file, oldPath) => {
@@ -57,8 +80,10 @@ export default class ObsidianRequestPlugin extends Plugin {
 
         const reactRoot = container.createDiv({ cls: 'obsidian-request-root', attr: { style: 'height: 100%; width: 100%;' } })
         const root = createRoot(reactRoot)
+        let unmounted = false
 
         loadCollection(this.app, pluginDir, collectionName).then(data => {
+            if (unmounted) return
             root.render(
                 React.createElement(App, {
                     data,
@@ -72,6 +97,7 @@ export default class ObsidianRequestPlugin extends Plugin {
 
         ctx.addChild(new (class extends MarkdownRenderChild {
             onunload() {
+                unmounted = true
                 root.unmount()
             }
         })(el))
